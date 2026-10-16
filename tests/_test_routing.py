@@ -78,6 +78,7 @@ from tkinterdnd2 import TkinterDnD
 root = TkinterDnD.Tk()
 app = mt_gui.App(root)
 app._check_and_install_fw = lambda: True               # 防止测试机触发 pip 安装
+app._check_and_install_comic = lambda: True
 
 class FakeEvent:
     def __init__(self, data):
@@ -110,11 +111,14 @@ drop(mkv)
 check("GUI: 拖 .mkv → media 引擎，game_path=文件",
       app.game_engine == "media" and app.game_path == mkv, (app.game_engine, app.game_path))
 
-# 漫画 → 可识别但不支持，弹指引，不进引擎流程
+# 漫画 → comic 引擎（OCR/嵌字），只处理拖入的这一个文件
 reset()
 drop(cbz)
-check("GUI: 拖 .cbz → comic 识别 + 不支持警告",
-      app.game_engine is None and any("Comic" in w for w in warns), warns)
+check("GUI: 拖 .cbz → comic 引擎，game_path=文件",
+      app.game_engine == "comic" and app.game_path == cbz
+      and app.game_extract_script.endswith("comic_extract.py")
+      and app.apply_script.endswith("comic_apply.py"),
+      (app.game_engine, app.game_path))
 
 # 多文件拖入 → 取第一个
 reset()

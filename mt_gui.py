@@ -1651,6 +1651,10 @@ class App:
                     if eng == "media":
                         if not self._check_and_install_fw():
                             return
+                    # 漫画嵌字需检查 rapidocr + Pillow
+                    if eng == "comic":
+                        if not self._check_and_install_comic():
+                            return
                     if messagebox.askyesno(
                             f"✅ {name}",
                             f"检测到 {name}，是否自动提取文本？\n\n"
@@ -1743,6 +1747,42 @@ class App:
             f"faster-whisper 安装失败:\n{msg}\n\n"
             "请手动运行 / Please run manually:\n  pip install faster-whisper")
         return False
+
+    def _check_and_install_comic(self):
+        """检测漫画依赖（rapidocr-onnxruntime + Pillow）；缺失时弹窗询问是否自动安装。"""
+        missing = []
+        if not mt_config.check_rapidocr():
+            missing.append(("rapidocr-onnxruntime", mt_config.install_rapidocr))
+        if not mt_config.check_pillow():
+            missing.append(("Pillow", mt_config.install_pillow))
+        if not missing:
+            return True
+        names = " + ".join(n for n, _ in missing)
+        answer = messagebox.askyesno(
+            "Comic deps / 漫画翻译依赖",
+            f"漫画嵌字需要 {names}（当前未检测到）。\n"
+            f"Comics lettering requires {names} (not found).\n\n"
+            "是否自动安装？（需要 Python 和 pip，约 100MB）\n"
+            "Install automatically? (Python & pip required, ~100MB)")
+        if not answer:
+            self.log(f"[comic] 用户取消安装 {names}")
+            return False
+        for name, installer in missing:
+            self.log(f"[comic] 正在安装 {name}…")
+            self.stage_var.set(f"Installing {name}…")
+            self.bar["value"] = 10
+            self.root.update()
+            ok, msg = installer()
+            if not ok:
+                self.log(f"[comic] 安装失败: {msg}")
+                messagebox.showerror(
+                    "Install Failed / 安装失败",
+                    f"{name} 安装失败:\n{msg}\n\n"
+                    "请手动运行 / Please run manually:\n"
+                    f"  pip install {name}")
+                return False
+            self.log(f"[comic] {name} 安装成功 ✓")
+        return True
 
     def _resolve_script(self, script):
         """定位引擎脚本：打包 exe 优先查 PyInstaller 数据区(_MEIPASS)，其次 exe 旁，最后源码目录"""

@@ -16,14 +16,14 @@ Kirikiri、Ren'Py、TyranoScript、Unity——或拖入整季字幕文件（.srt
 实弹验证：7 万+条 MTool 语料；Kirikiri 在 3 个真实游戏上验证（17 封包 / 22,806 文件 /
 单游戏最多 44,296 段）；Ren'Py 与 SDK 官方法语翻译交叉验证（788/788 语句标识符全中）；
 Ruby Marshal 编解码器通过字节级规范字节串、300 轮 fuzz 与 `rubymarshal` 双向交叉验证。
-10 套自测覆盖每个引擎的全链路。
+11 套自测覆盖每个引擎的全链路。
 
 ## 下载
 
 到 [**Releases**](https://github.com/luckyfun10086/OmniTrans/releases) 页面下载 `OmniTrans.exe`
 ——Windows 独立可执行文件（约 11MB），无需安装 Python。v2.0.0 起提供引擎支持
-（现 10 种：8 游戏引擎 + 字幕 + 音视频听译）、三标签页界面与暗色模式。`.env`、
-`names.txt`、`mt_work/` 全部生成在 exe 同目录。
+（现 11 种：8 游戏引擎 + 字幕 + 音视频听译 + 漫画）、三标签页界面与暗色模式。
+`.env`、`names.txt`、`mt_work/` 全部生成在 exe 同目录。
 
 ## 隐私与安全设计
 
@@ -177,7 +177,7 @@ Bob               不写 = 号则保持英文原样
 | **Unity**（TextAsset 剧本 / MonoBehaviour 内嵌文本 / Addressables・Localization 字符串表 Bundle） | `*_Data` + `StreamingAssets/**/*.bundle` | ✅ 支持（依赖 UnityPy，GUI 首次使用自动弹窗安装；不支持编译进 DLL 的字符串） |
 | **字幕文件**（.srt / .ass / .vtt） | 任意含字幕文件的目录 | ✅ 支持——台词去重、时间轴完整保留，输出 `原名.zh.srt`（非破坏，不动原文件） |
 | **音视频**（无字幕） | `.mp4` `.mkv` `.ts` 等 / `.mp3` `.m4a` 等 | ✅ 支持——本地 Whisper 听译（faster-whisper）先生成 `.srt` 再走字幕链路；已有同名 `.srt` 直接复用，绝不重复听译 |
-| **漫画**（图片文件夹 / `.cbz`） | 页图文件夹（含 `ch_001/` 子目录结构）、`.cbz`/`.cbr`/`.cb7` | 🚧 可识别，引擎开发中——气泡检测/OCR → 机翻 → 嵌字回写已在计划内；拖入会显示引擎徽章与指引 |
+| **漫画**（图片文件夹 / `.cbz`） | 页图文件夹（含 `ch_001/` 子目录结构）、`.cbz`/`.cbr`/`.cb7` | ✅ 支持——本地 OCR（[rapidocr-onnxruntime](https://github.com/RapidAI/RapidOCR)）→ 机翻 → Pillow 嵌字（竖长框自动竖排、字号自适应）；输出到同级 `原名.zh/` 文件夹或 `原名.zh.cbz`，原文件不动 |
 
 可识别但暂不支持：SiglusEngine（Key 社）、AliceSoft（.ain）、ExHIBIT、
 NScripter、EXSTIA——拖入即提示引擎名称与替代方案。
@@ -311,6 +311,20 @@ python engines/subtitle_apply.py <目录> <名>_extracted_translated.json   # ep
 - 模型：首次听译自动下载并缓存（默认 `small` ≈ 244MB）；`.env` 里 `MT_ASR_MODEL`
   可换 tiny～large-v3；HuggingFace 下载慢可设环境变量 `HF_ENDPOINT=https://hf-mirror.com`
 - 源语言逐文件自动检测（`.env` 设了具体 `MT_SL` 则按它听译）
+
+### 漫画（图片文件夹 / CBZ）
+
+拖入页图文件夹或 `.cbz` 即识别为「Comics」引擎。逐页本地 OCR
+（[rapidocr-onnxruntime](https://github.com/RapidAI/RapidOCR)）得到文本区域，
+重复台词去重；翻译后 `comic_apply.py` 嵌字回写：区域用边缘取样底色填充
+（气泡≈白），译文按框自动收缩字号绘制——竖长框且目标语言为中日文时自动竖排
+（列从右到左）。纯符号区域（♪ 等）不送翻也不改动。输出非破坏性：文件夹 →
+同级 `原名.zh/`，档案 → 同级 `原名.zh.cbz`。
+
+- 依赖：`pip install rapidocr-onnxruntime Pillow`（GUI 首次使用弹窗自动安装）；
+  字体自动取系统 CJK 字体，`.env` 里 `MT_FONT` 可指定
+- 已知边界：OCR 通用模型对横排文本最强，日漫竖排原文识别有限
+  （译文竖排渲染不受影响）；该场景的高质量路线（manga-ocr 桥接）在计划内
 
 ### SRPG Studio 游戏专用流程
 

@@ -23,15 +23,15 @@ Validated in the field: a 70,000+ string MTool corpus; Kirikiri on three real ga
 (17 archives / 22,806 files / up to 44,296 segments per game); Ren'Py against the
 SDK's engine-generated French translation (788/788 statement identifiers matched);
 the Ruby Marshal codec passes byte-exact ground truth, 300 fuzz round-trips and
-bidirectional cross-validation with the `rubymarshal` library. Ten self-test
+bidirectional cross-validation with the `rubymarshal` library. Eleven self-test
 suites cover every engine end-to-end.
 
 ## Download
 
 Grab `OmniTrans.exe` from the [**Releases**](https://github.com/luckyfun10086/OmniTrans/releases)
 page — a standalone Windows binary (~11 MB), no Python required. v2.0.0 ships
-10-engine support (8 game engines + subtitles + video/audio transcription),
-the 3-tab GUI and dark mode. Everything (`.env`, `names.txt`,
+11-format support (8 game engines + subtitles + video/audio transcription +
+comics), the 3-tab GUI and dark mode. Everything (`.env`, `names.txt`,
 `mt_work/`) is created next to the exe.
 
 > **Quality & fair use**: the built-in free endpoint delivers basic machine-translation
@@ -207,7 +207,7 @@ work in every mode.
 | **Unity** (TextAsset scenarios / MonoBehaviour strings / Addressables & Localization bundles) | `*_Data` + `StreamingAssets/**/*.bundle` | ✅ supported (needs UnityPy — the GUI offers to install it on first use; strings compiled into DLLs are out of scope) |
 | **Subtitles** (.srt / .ass / .vtt) | any folder containing subtitle files | ✅ supported — dedup + timeline-preserving write to `name.zh.srt` next to the originals (non-destructive) |
 | **Video / Audio** (no subtitles) | `.mp4` `.mkv` `.ts` … / `.mp3` `.m4a` … | ✅ supported — local Whisper transcription (faster-whisper) generates the `.srt`, then the subtitle flow takes over; existing same-name `.srt` files are reused, never re-transcribed |
-| **Comics** (image folders / `.cbz`) | folders of page images, `.cbz`/`.cbr`/`.cb7` | 🚧 recognized, engine in development — bubble detection/OCR → translate → typeset write-back is on the roadmap; dropping shows the engine badge and guidance |
+| **Comics** (image folders / `.cbz`) | folders of page images, `.cbz`/`.cbr`/`.cb7` | ✅ supported — local OCR ([rapidocr-onnxruntime](https://github.com/RapidAI/RapidOCR)) → translate → Pillow lettering (vertical text in tall boxes for zh/ja, auto font sizing); output to a sibling `name.zh/` folder or `name.zh.cbz`, originals untouched |
 
 Detected but not (yet) supported: SiglusEngine (Key), AliceSoft (.ain), ExHIBIT,
 NScripter, EXSTIA — dropping such a folder tells you which engine it is and
@@ -367,6 +367,27 @@ same-name `.srt` are reused as-is. Progress streams live into the GUI log.
   (`small` ≈ 244 MB by default); pick `tiny`…`large-v3` via `MT_ASR_MODEL` in
   `.env`. Slow HuggingFace downloads? Set `HF_ENDPOINT=https://hf-mirror.com`
 - Source language is auto-detected per file (or forced via `MT_SL`)
+
+### Comics (image folders / CBZ)
+
+Drop a folder of page images or a `.cbz` — recognized as the *Comics*
+engine. Pages are OCR'd locally with
+[rapidocr-onnxruntime](https://github.com/RapidAI/RapidOCR) into text
+regions; repeated lines dedup into one translation. After translation,
+`comic_apply.py` lettering-renders each region: the box is filled with a
+color sampled from its border (bubbles ≈ white), then the translation is
+auto-sized and drawn — tall boxes with zh/ja text render vertically
+(columns right-to-left). Symbol-only regions (♪ etc.) are neither
+translated nor touched. Output is non-destructive: a sibling `name.zh/`
+folder, or `name.zh.cbz` for archives.
+
+- Dependencies: `pip install rapidocr-onnxruntime Pillow` (GUI prompts on
+  first use); the font is picked from system CJK fonts, override via
+  `MT_FONT` in `.env`
+- Known limit: the OCR model is strongest at horizontal text; heavily
+  vertical Japanese manga is only partially recognized at the source stage
+  (translation rendering is unaffected). A manga-ocr bridge is on the
+  roadmap for that case.
 
 ### SRPG Studio games
 

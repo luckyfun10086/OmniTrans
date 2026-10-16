@@ -21,7 +21,7 @@ DEFAULT_ENDPOINT = ("https://clients5.google.com/translate_a/t"
 
 ENV_KEYS = ("MT_ENDPOINT", "MT_API_KEY", "MT_API_HEADER", "MT_SL", "MT_TL",
             "MT_AUTO_NAMES", "MT_LANG", "MT_API_TYPE", "MT_MODEL", "MT_FALLBACK",
-            "MT_THEME", "MT_BG", "MT_CONTEXT", "MT_ASR_MODEL")
+            "MT_THEME", "MT_BG", "MT_CONTEXT", "MT_ASR_MODEL", "MT_FONT")
 
 class ApiError(Exception):
     """kind: 'fatal' 立即终止（401/402/404 等，重试无意义）
@@ -428,11 +428,11 @@ ENGINES = {
                   "extractor": "engines/subtitle_extract.py",
                   "applier": "engines/subtitle_apply.py",
                   "deps": [], "detect": _det_subtitle},
-    # ---- 可识别、开发中 ----
-    "comic":     {"name": "Comics (images / CBZ)", "supported": False,
-                  "detect": _det_comic,
-                  "reason": ("漫画嵌字引擎开发中（气泡检测/OCR → 机翻 → 排版回写）。"
-                             "当前可先翻译同目录的字幕/文本文件，漫画支持请关注后续版本。")},
+    # ---- 漫画（图片文件夹 / CBZ：OCR → 机翻 → 嵌字回写） ----
+    "comic":     {"name": "Comics (images / CBZ)", "supported": True,
+                  "extractor": "engines/comic_extract.py",
+                  "applier": "engines/comic_apply.py",
+                  "deps": ["rapidocr-onnxruntime", "Pillow"], "detect": _det_comic},
 }
 
 # 检测顺序：最具体的签名在前（避免 Unity 的 *_Data 等宽泛规则抢跑）；
@@ -519,6 +519,27 @@ def check_fasterwhisper():
 def install_fasterwhisper():
     """pip install faster-whisper。返回 (成功, 信息)。"""
     return pip_install("faster-whisper")
+
+def check_rapidocr():
+    """检测 rapidocr-onnxruntime 是否可用（漫画 OCR 用；含系统 site-packages 补找）。"""
+    import importlib.util
+    if importlib.util.find_spec("rapidocr_onnxruntime") is not None:
+        return True
+    import site as _site
+    paths = list(_site.getsitepackages()) if hasattr(_site, 'getsitepackages') else []
+    usp = _site.getusersitepackages()
+    if usp:
+        paths.append(usp)
+    for sp in paths:
+        if os.path.isdir(sp) and os.path.exists(os.path.join(sp, "rapidocr_onnxruntime")):
+            sys.path.insert(0, sp)
+            if importlib.util.find_spec("rapidocr_onnxruntime") is not None:
+                return True
+    return False
+
+def install_rapidocr():
+    """pip install rapidocr-onnxruntime。返回 (成功, 信息)。"""
+    return pip_install("rapidocr-onnxruntime")
 
 def check_pillow():
     """检测 Pillow 是否可用（背景图功能用，GUI 可选依赖）。"""
