@@ -21,7 +21,7 @@ DEFAULT_ENDPOINT = ("https://clients5.google.com/translate_a/t"
 
 ENV_KEYS = ("MT_ENDPOINT", "MT_API_KEY", "MT_API_HEADER", "MT_SL", "MT_TL",
             "MT_AUTO_NAMES", "MT_LANG", "MT_API_TYPE", "MT_MODEL", "MT_FALLBACK",
-            "MT_THEME", "MT_BG", "MT_CONTEXT")
+            "MT_THEME", "MT_BG", "MT_CONTEXT", "MT_ASR_MODEL")
 
 class ApiError(Exception):
     """kind: 'fatal' 立即终止（401/402/404 等，重试无意义）
@@ -327,6 +327,59 @@ def _det_exstia(game_dir, files):
     # Liar-soft 系 EXSTIA：_CONFIG.MED / install.dat
     return "_CONFIG.MED" in files or _has_ext(files, ".med")
 
+def _det_subtitle(game_dir, files):
+    # 字幕文件（.srt/.vtt/.ass/.ssa）：也看一层子目录（Season 01/ 结构）
+    if _has_ext(files, ".srt", ".vtt", ".ass", ".ssa"):
+        return True
+    for d in files:
+        p = os.path.join(game_dir, d)
+        if os.path.isdir(p):
+            try:
+                if _has_ext(set(os.listdir(p)), ".srt", ".vtt", ".ass", ".ssa"):
+                    return True
+            except OSError:
+                pass
+    return False
+
+_MEDIA_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".wmv", ".mpg", ".mpeg", ".ts",
+               ".m2ts", ".webm", ".flv", ".m4v", ".3gp", ".ogv", ".rmvb", ".vob",
+               ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".wma", ".aac", ".amr")
+
+def _det_media(game_dir, files):
+    # 音视频（faster-whisper 听译）：一层子目录（Season 01/ 结构）也算
+    if _has_ext(files, *_MEDIA_EXTS):
+        return True
+    for d in files:
+        p = os.path.join(game_dir, d)
+        if os.path.isdir(p):
+            try:
+                if _has_ext(set(os.listdir(p)), *_MEDIA_EXTS):
+                    return True
+            except OSError:
+                pass
+    return False
+
+_IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif")
+_COMIC_ARCHIVES = (".cbz", ".cbr", ".cb7")
+
+def _det_comic(game_dir, files):
+    # 漫画：CBZ/CBR/CB7 档，或以页图为主的文件夹（含一层子目录，ch_001/ 结构）
+    if _has_ext(files, *_COMIC_ARCHIVES):
+        return True
+    n = sum(1 for f in files if f.lower().endswith(_IMG_EXTS))
+    if n >= 4:
+        return True
+    for d in files:
+        p = os.path.join(game_dir, d)
+        if os.path.isdir(p):
+            try:
+                n += sum(1 for f in os.listdir(p) if f.lower().endswith(_IMG_EXTS))
+            except OSError:
+                pass
+            if n >= 4:
+                return True
+    return False
+
 ENGINES = {
     # ---- 已支持（提供 extract/apply 全链路） ----
     "rpg_mvmz":   {"name": "RPG Maker MV/MZ", "supported": True,
@@ -365,15 +418,42 @@ ENGINES = {
                    "reason": "暂不支持（nscript.dat 加密封包）。可用 NSDEC 解包后翻译，或使用 MTool。"},
     "exstia":    {"name": "EXSTIA (.MED)", "supported": False, "detect": _det_exstia,
                    "reason": "暂不支持（Liar-soft 私有 .MED/install.dat 格式）。请使用 MTool 运行时翻译。"},
+    # ---- 非游戏载体（放最后，避免抢走自带过场媒体的游戏目录） ----
+    # media 在 subtitle 前：既有视频又有字幕的目录走 media（已有字幕自动复用，缺的听译补上）
+    "media":      {"name": "Video / Audio (Whisper ASR)", "supported": True,
+                   "extractor": "engines/media_extract.py",
+                   "applier": "engines/subtitle_apply.py",
+                   "deps": ["faster-whisper"], "detect": _det_media},
+    "subtitle":  {"name": "Subtitle files (SRT/ASS/VTT)", "supported": True,
+                  "extractor": "engines/subtitle_extract.py",
+                  "applier": "engines/subtitle_apply.py",
+                  "deps": [], "detect": _det_subtitle},
+    # ---- 可识别、开发中 ----
+    "comic":     {"name": "Comics (images / CBZ)", "supported": False,
+                  "detect": _det_comic,
+                  "reason": ("漫画嵌字引擎开发中（气泡检测/OCR → 机翻 → 排版回写）。"
+                             "当前可先翻译同目录的字幕/文本文件，漫画支持请关注后续版本。")},
 }
 
-# 检测顺序：最具体的签名在前（避免 Unity 的 *_Data 等宽泛规则抢跑）
+# 检测顺序：最具体的签名在前（避免 Unity 的 *_Data 等宽泛规则抢跑）；
+# media/subtitle/comic 最宽泛（带视频/.srt/成堆图片的目录都命中），必须垫底
 _DETECT_ORDER = ["exhibit", "siglus", "nscripter", "exstia", "kirikiri", "wolf",
                  "rpg_vxace", "srpg_studio", "rpg_mvmz", "renpy", "tyrano",
-                 "alice", "unity"]
+                 "alice", "unity", "media", "subtitle", "comic"]
 
 def detect_engine(path):
-    """传入游戏目录或 exe 路径，返回 (engine_key, display_name, supported, reason)"""
+    """传入游戏目录 / exe / 任意内容文件，返回 (engine_key, display_name, supported, reason)。
+    文件路径先按自身扩展名判意图（拖的是字幕/视频/漫画档就是它，不看邻居），
+    其余（如 .exe）回退到所在目录的内容识别。"""
+    if os.path.isfile(path):
+        fake = {os.path.basename(path)}
+        for key in ("subtitle", "media", "comic"):
+            e = ENGINES[key]
+            try:
+                if e["detect"](os.path.dirname(path), fake):
+                    return (key, e["name"], e["supported"], e.get("reason", ""))
+            except Exception:
+                continue
     game_dir = path if os.path.isdir(path) else os.path.dirname(path)
     files = set(os.listdir(game_dir)) if os.path.isdir(game_dir) else set()
     for key in _DETECT_ORDER:
@@ -383,8 +463,9 @@ def detect_engine(path):
                 return (key, e["name"], e["supported"], e.get("reason", ""))
         except Exception:
             continue
-    return ("unknown", "未知引擎", False,
-            "无法识别引擎。如果是 MTool 导出的 json 请直接拖 json 文件。")
+    return ("unknown", "未知内容", False,
+            "无法识别内容。支持：游戏目录/EXE、字幕（.srt/.ass/.vtt）、音视频"
+            "（.mp4/.mkv/.mp3…）、漫画（图片文件夹/.cbz）；MTool 导出的 json 可直接拖入。")
 
 # 兼容旧接口：支持的引擎 → 提取脚本
 def engine_extractor(key):
@@ -417,6 +498,27 @@ def check_unitypy():
 def install_unitypy():
     """pip install UnityPy。返回 (成功, 信息)。"""
     return pip_install("UnityPy")
+
+def check_fasterwhisper():
+    """检测 faster-whisper 是否可用（听译功能用；同 UnityPy 的补找逻辑）。"""
+    import importlib.util
+    if importlib.util.find_spec("faster_whisper") is not None:
+        return True
+    import site as _site
+    paths = list(_site.getsitepackages()) if hasattr(_site, 'getsitepackages') else []
+    usp = _site.getusersitepackages()
+    if usp:
+        paths.append(usp)
+    for sp in paths:
+        if os.path.isdir(sp) and os.path.exists(os.path.join(sp, "faster_whisper")):
+            sys.path.insert(0, sp)
+            if importlib.util.find_spec("faster_whisper") is not None:
+                return True
+    return False
+
+def install_fasterwhisper():
+    """pip install faster-whisper。返回 (成功, 信息)。"""
+    return pip_install("faster-whisper")
 
 def check_pillow():
     """检测 Pillow 是否可用（背景图功能用，GUI 可选依赖）。"""

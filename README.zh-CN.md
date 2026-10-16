@@ -3,7 +3,8 @@
 [English](README.md) | **简体中文**
 
 一键游戏汉化：把游戏目录拖进来——RPG Maker MV/MZ、VX Ace/VX/XP、SRPG Studio、
-Kirikiri、Ren'Py、TyranoScript、Unity——自动识别引擎，提取文本 → 机翻 → 回写，
+Kirikiri、Ren'Py、TyranoScript、Unity——或拖入整季字幕文件（.srt/.ass/.vtt）、
+无字幕的音视频（本地 Whisper 听译）——自动识别格式，提取文本 → 机翻 → 回写，
 全程自动备份（Kirikiri/Ren'Py 为非破坏覆盖补丁）。也支持直接翻译 MTool 导出的
 `ManualTransFile.json`。默认走内置免费端点（公开、无需密钥、不审查内容），也可在
 界面里填入**你自己的 DeepL/LLM 翻译接口**（保存在本机 `.env`，绝不入库）。
@@ -15,13 +16,14 @@ Kirikiri、Ren'Py、TyranoScript、Unity——自动识别引擎，提取文本 
 实弹验证：7 万+条 MTool 语料；Kirikiri 在 3 个真实游戏上验证（17 封包 / 22,806 文件 /
 单游戏最多 44,296 段）；Ren'Py 与 SDK 官方法语翻译交叉验证（788/788 语句标识符全中）；
 Ruby Marshal 编解码器通过字节级规范字节串、300 轮 fuzz 与 `rubymarshal` 双向交叉验证。
-8 套自测覆盖每个引擎的全链路。
+10 套自测覆盖每个引擎的全链路。
 
 ## 下载
 
 到 [**Releases**](https://github.com/luckyfun10086/OmniTrans/releases) 页面下载 `OmniTrans.exe`
-——Windows 独立可执行文件（约 11MB），无需安装 Python。v2.0.0 起提供 8 引擎支持、
-三标签页界面与暗色模式。`.env`、`names.txt`、`mt_work/` 全部生成在 exe 同目录。
+——Windows 独立可执行文件（约 11MB），无需安装 Python。v2.0.0 起提供引擎支持
+（现 10 种：8 游戏引擎 + 字幕 + 音视频听译）、三标签页界面与暗色模式。`.env`、
+`names.txt`、`mt_work/` 全部生成在 exe 同目录。
 
 ## 隐私与安全设计
 
@@ -120,6 +122,9 @@ pyinstaller --onefile --windowed --name OmniTrans --collect-all tkinterdnd2
   --add-data "engines/tyrano_extract.py;engines/" --add-data "engines/tyrano_apply.py;engines/" 
   --add-data "engines/unity_extract.py;engines/" --add-data "engines/unity_apply.py;engines/"
   --add-data "engines/wolf_extract.py;engines/" --add-data "engines/wolf_apply.py;engines/"
+  --add-data "engines/subtitle_extract.py;engines/" --add-data "engines/subtitle_apply.py;engines/"
+  --add-data "engines/subtitle_lib.py;engines/"
+  --add-data "engines/media_extract.py;engines/"
   --add-data "engines/mtool_export.py;engines/" mt_gui.py
 ```
 
@@ -170,6 +175,9 @@ Bob               不写 = 号则保持英文原样
 | **Ren'Py**（6.99+/7/8） | `game/*.rpa`、`game/*.rpyc` | ✅ 完整支持——生成官方 `game/tl/<语言>/` 翻译包（非破坏） |
 | **TyranoScript** | `data/scenario/*.ks` | ✅ 完整支持 |
 | **Unity**（TextAsset 剧本 / MonoBehaviour 内嵌文本 / Addressables・Localization 字符串表 Bundle） | `*_Data` + `StreamingAssets/**/*.bundle` | ✅ 支持（依赖 UnityPy，GUI 首次使用自动弹窗安装；不支持编译进 DLL 的字符串） |
+| **字幕文件**（.srt / .ass / .vtt） | 任意含字幕文件的目录 | ✅ 支持——台词去重、时间轴完整保留，输出 `原名.zh.srt`（非破坏，不动原文件） |
+| **音视频**（无字幕） | `.mp4` `.mkv` `.ts` 等 / `.mp3` `.m4a` 等 | ✅ 支持——本地 Whisper 听译（faster-whisper）先生成 `.srt` 再走字幕链路；已有同名 `.srt` 直接复用，绝不重复听译 |
+| **漫画**（图片文件夹 / `.cbz`） | 页图文件夹（含 `ch_001/` 子目录结构）、`.cbz`/`.cbr`/`.cb7` | 🚧 可识别，引擎开发中——气泡检测/OCR → 机翻 → 嵌字回写已在计划内；拖入会显示引擎徽章与指引 |
 
 可识别但暂不支持：SiglusEngine（Key 社）、AliceSoft（.ain）、ExHIBIT、
 NScripter、EXSTIA——拖入即提示引擎名称与替代方案。
@@ -274,6 +282,35 @@ python engines/wolf_apply.py <游戏目录> <游戏名>_extracted_translated.jso
 **Wolf 3.x 文本存储支持中文、全链路可用；Wolf 2.x 为 CP932，简体字会被丢弃**
 （日文兼容译文仍可回写）。2.x 的中文汉化请改用 MTool 导出路径。
 已在官方 3.728 基本系统（全链路往返）与真实 2.x 封包游戏（Misao，548 条）上验证。
+
+### 字幕文件（.srt / .ass / .vtt）
+
+拖入视频目录（或单个字幕文件）即识别为「Subtitle」引擎。时间轴、VTT 头、
+ASS 样式完整保留在 sidecar 里；重复台词自动去重（只翻一次、处处替换）；
+送翻前剥离行内标记（`<i>`、`{\an8}`、ASS 的 `{\...}`/`\N`）。回写**非破坏性**，
+输出落在原文件旁边：
+
+```
+python engines/subtitle_extract.py <目录>       # → <名>_extracted.json + <名>_subs.json
+python mt_clean.py <名>_extracted.json && python mt_translate.py && python mt_apply.py <名>_extracted.json
+python engines/subtitle_apply.py <目录> <名>_extracted_translated.json   # ep01.srt → ep01.zh.srt
+```
+
+编码自动探测：BOM / UTF-8 / GBK / Big5 / Shift-JIS / cp1252，输出一律 UTF-8。
+未翻译的条目自动保持原文（半成品也能安全输出）；加 `--bi` 参数生成双语字幕
+（译文在上、原文在下）。
+
+### 无字幕音视频（本地 Whisper 听译）
+
+拖入视频目录（或音频）即识别为「Video / Audio」引擎。每个文件用
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) **本地**听译
+（CPU int8，音频绝不上传）生成同名 `.srt`，再走上面的字幕链路；已有同名
+`.srt` 的媒体直接复用。听译进度实时流进 GUI 日志区。
+
+- 依赖：`pip install faster-whisper`（约 150MB；GUI 首次使用弹窗自动安装，同 UnityPy）
+- 模型：首次听译自动下载并缓存（默认 `small` ≈ 244MB）；`.env` 里 `MT_ASR_MODEL`
+  可换 tiny～large-v3；HuggingFace 下载慢可设环境变量 `HF_ENDPOINT=https://hf-mirror.com`
+- 源语言逐文件自动检测（`.env` 设了具体 `MT_SL` 则按它听译）
 
 ### SRPG Studio 游戏专用流程
 

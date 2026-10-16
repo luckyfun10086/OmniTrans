@@ -3,7 +3,9 @@
 **English** | [简体中文](README.zh-CN.md)
 
 One-click game localization: drop a game folder — RPG Maker MV/MZ, VX Ace/VX/XP,
-SRPG Studio, Kirikiri, Ren'Py, TyranoScript, Unity — the engine is auto-detected,
+SRPG Studio, Kirikiri, Ren'Py, TyranoScript, Unity — or a folder of subtitle files
+(.srt/.ass/.vtt) or raw video/audio (locally transcribed with Whisper) — the
+format is auto-detected,
 text is extracted, machine-translated and written back with automatic backups
 (Kirikiri/Ren'Py use non-destructive overlay patches). MTool-exported
 `ManualTransFile.json` files are also supported as input. Free public translation
@@ -21,14 +23,15 @@ Validated in the field: a 70,000+ string MTool corpus; Kirikiri on three real ga
 (17 archives / 22,806 files / up to 44,296 segments per game); Ren'Py against the
 SDK's engine-generated French translation (788/788 statement identifiers matched);
 the Ruby Marshal codec passes byte-exact ground truth, 300 fuzz round-trips and
-bidirectional cross-validation with the `rubymarshal` library. Eight self-test
+bidirectional cross-validation with the `rubymarshal` library. Ten self-test
 suites cover every engine end-to-end.
 
 ## Download
 
 Grab `OmniTrans.exe` from the [**Releases**](https://github.com/luckyfun10086/OmniTrans/releases)
-page — a standalone Windows binary (~11 MB), no Python required. v2.0.0 ships the
-8-engine support, the 3-tab GUI and dark mode. Everything (`.env`, `names.txt`,
+page — a standalone Windows binary (~11 MB), no Python required. v2.0.0 ships
+10-engine support (8 game engines + subtitles + video/audio transcription),
+the 3-tab GUI and dark mode. Everything (`.env`, `names.txt`,
 `mt_work/`) is created next to the exe.
 
 > **Quality & fair use**: the built-in free endpoint delivers basic machine-translation
@@ -83,6 +86,9 @@ pyinstaller --onefile --windowed --name OmniTrans --collect-all tkinterdnd2
   --add-data "engines/tyrano_extract.py;engines/" --add-data "engines/tyrano_apply.py;engines/" 
   --add-data "engines/unity_extract.py;engines/" --add-data "engines/unity_apply.py;engines/"
   --add-data "engines/wolf_extract.py;engines/" --add-data "engines/wolf_apply.py;engines/"
+  --add-data "engines/subtitle_extract.py;engines/" --add-data "engines/subtitle_apply.py;engines/"
+  --add-data "engines/subtitle_lib.py;engines/"
+  --add-data "engines/media_extract.py;engines/"
   --add-data "engines/mtool_export.py;engines/" mt_gui.py
 ```
 
@@ -199,6 +205,9 @@ work in every mode.
 | **Ren'Py** (6.99+/7/8) | `game/*.rpa`, `game/*.rpyc` | ✅ fully supported — generates official `game/tl/<lang>/` packages (non-destructive) |
 | **TyranoScript** | `data/scenario/*.ks` | ✅ fully supported |
 | **Unity** (TextAsset scenarios / MonoBehaviour strings / Addressables & Localization bundles) | `*_Data` + `StreamingAssets/**/*.bundle` | ✅ supported (needs UnityPy — the GUI offers to install it on first use; strings compiled into DLLs are out of scope) |
+| **Subtitles** (.srt / .ass / .vtt) | any folder containing subtitle files | ✅ supported — dedup + timeline-preserving write to `name.zh.srt` next to the originals (non-destructive) |
+| **Video / Audio** (no subtitles) | `.mp4` `.mkv` `.ts` … / `.mp3` `.m4a` … | ✅ supported — local Whisper transcription (faster-whisper) generates the `.srt`, then the subtitle flow takes over; existing same-name `.srt` files are reused, never re-transcribed |
+| **Comics** (image folders / `.cbz`) | folders of page images, `.cbz`/`.cbr`/`.cb7` | 🚧 recognized, engine in development — bubble detection/OCR → translate → typeset write-back is on the roadmap; dropping shows the engine badge and guidance |
 
 Detected but not (yet) supported: SiglusEngine (Key), AliceSoft (.ain), ExHIBIT,
 NScripter, EXSTIA — dropping such a folder tells you which engine it is and
@@ -324,6 +333,40 @@ CP932 and drops Simplified Chinese characters** (Japanese-compatible
 translations still apply). For 2.x Chinese localization use the MTool
 export path instead. Verified on the official 3.728 base system (full
 round-trip) and a real packed 2.x game (Misao, 548 strings).
+
+### Subtitle files (.srt / .ass / .vtt)
+
+Drop a video folder (or a single subtitle file) — recognized as the *Subtitle*
+engine. Timelines, VTT headers and ASS styles are preserved via a sidecar file;
+duplicate lines are deduplicated (translated once, replaced everywhere); inline
+tags (`<i>`, `{\an8}`, ASS `{\...}`/`\N`) are stripped before translation.
+Writing back is **non-destructive** — output lands next to the originals:
+
+```
+python engines/subtitle_extract.py <folder>    # → <name>_extracted.json + <name>_subs.json
+python mt_clean.py <name>_extracted.json && python mt_translate.py && python mt_apply.py <name>_extracted.json
+python engines/subtitle_apply.py <folder> <name>_extracted_translated.json   # ep01.srt → ep01.zh.srt
+```
+
+Encoding auto-detection: BOM / UTF-8 / GBK / Big5 / Shift-JIS / cp1252 —
+output is always UTF-8. Untranslated entries keep the original text, so
+partial translations are safe to apply. Pass `--bi` for bilingual subtitles
+(translation on top, original below).
+
+### Video / audio without subtitles (local Whisper transcription)
+
+Drop a folder of videos (or audio) — recognized as the *Video/Audio* engine.
+Each file is transcribed **locally** with [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+(CPU, int8 — audio never leaves the machine) into a same-name `.srt`, which
+then flows through the subtitle pipeline above. Files that already have a
+same-name `.srt` are reused as-is. Progress streams live into the GUI log.
+
+- Dependency: `pip install faster-whisper` (~150 MB; the GUI offers to install
+  it on first use, same as UnityPy)
+- Model: downloaded automatically on first transcription and cached
+  (`small` ≈ 244 MB by default); pick `tiny`…`large-v3` via `MT_ASR_MODEL` in
+  `.env`. Slow HuggingFace downloads? Set `HF_ENDPOINT=https://hf-mirror.com`
+- Source language is auto-detected per file (or forced via `MT_SL`)
 
 ### SRPG Studio games
 

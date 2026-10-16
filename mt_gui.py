@@ -5,7 +5,8 @@ OmniTrans 上位机（GUI，中英双语，三大功能分区）
 - 标签页分区：⚡快速翻译（json 管线）/ 🎮游戏汉化（引擎识别→提取→翻译→导入）
   / ⚙设置（翻译接口配置）
 - 顶部 中/EN 切换按钮，所有界面文字即时切换，选择持久化到 .env (MT_LANG)
-- 拖拽 json 走翻译管线；拖游戏目录/EXE 自动识别引擎并切到游戏汉化页
+- 拖拽 json 走翻译管线；拖游戏目录/EXE/字幕/音视频/漫画自动按内容识别路由：
+  单文件按扩展名判意图（拖的是它），目录按内容判（游戏 > 媒体 > 字幕 > 漫画）
 - 拖拽支持需要 tkinterdnd2：pip install tkinterdnd2（未装时用「选择文件」按钮）
 """
 import json, re, sys, io, os, time, queue, random, hashlib, threading, traceback
@@ -42,7 +43,7 @@ S = {
         "url": "URL:", "key": "Key:", "header": "请求头:",
         "save_env": "保存到 .env",
         "api_hint": "MT·GET：URL 用 {sl}/{tl}/{q} 占位符，留默认=免费端点 | AI·OpenAI：URL 填 chat/completions 地址+模型名，支持 DeepSeek/Kimi/GLM/OpenRouter/Ollama 等",
-        "drop": "拖入 ManualTransFile.json 或游戏目录\n（或点击选择文件）",
+        "drop": "拖入 JSON / 游戏目录 / 字幕 / 音视频 / 漫画\n（或点击选择文件）",
         "drop_nodnd": "\n（提示：pip install tkinterdnd2 可启用拖拽）",
         "start": "开始翻译", "cancel": "取消", "open_out": "打开输出文件夹",
         "waiting": "等待文件…", "ready": "已就绪：{}", "done_stage": "③ 完成！",
@@ -73,8 +74,8 @@ S = {
         "tab_quick": "⚡ 快速翻译",
         "tab_game": "🎮 游戏汉化",
         "tab_cfg": "⚙ 设置",
-        "g_title": "游戏一键汉化（拖入游戏目录或 EXE 自动识别引擎）",
-        "g_drop": "拖入游戏目录 / EXE 到窗口任意位置",
+        "g_title": "一键翻译（拖入游戏目录/EXE、字幕、音视频、漫画，自动识别）",
+        "g_drop": "拖入游戏目录 / EXE / 字幕 / 音视频 / 漫画到窗口任意位置",
         "g_engine": "引擎：{}",
         "g_unknown": "未识别",
         "g_steps": "流程：① 识别引擎 → ② 提取文本 → ③ 机器翻译 → ④ 导入游戏",
@@ -141,7 +142,7 @@ S = {
         "url": "URL:", "key": "Key:", "header": "Header:",
         "save_env": "Save to .env",
         "api_hint": "MT·GET: URL with {sl}/{tl}/{q} placeholders, default = free endpoint | AI·OpenAI: full chat/completions URL + model (DeepSeek/Kimi/GLM/OpenRouter/Ollama…)",
-        "drop": "Drop ManualTransFile.json or a game folder here\n(or click to browse)",
+        "drop": "Drop JSON / a game folder / subtitles / video / comics here\n(or click to browse)",
         "drop_nodnd": "\n(tip: pip install tkinterdnd2 enables drag & drop)",
         "start": "Start", "cancel": "Cancel", "open_out": "Open output folder",
         "waiting": "Waiting for a file…", "ready": "Ready: {}", "done_stage": "③ Done!",
@@ -172,8 +173,8 @@ S = {
         "tab_quick": "⚡ Quick Translate",
         "tab_game": "🎮 Game Localization",
         "tab_cfg": "⚙ Settings",
-        "g_title": "One-click game localization (drop a game folder / EXE to auto-detect the engine)",
-        "g_drop": "Drop a game folder / EXE anywhere in the window",
+        "g_title": "One-click translation (drop a game folder/EXE, subtitles, video or comics — auto-detected)",
+        "g_drop": "Drop a game folder / EXE / subtitles / video / comics anywhere in the window",
         "g_engine": "Engine: {}",
         "g_unknown": "Not detected",
         "g_steps": "Flow: ① Detect → ② Extract → ③ Translate → ④ Apply to game",
@@ -257,6 +258,66 @@ def canon(s):
 
 class Cancel(Exception):
     pass
+
+class _NoCloseBytesIO(io.BytesIO):
+    """close() 恒为 no-op：旧引擎脚本丢弃其 stdout wrapper 时，GC 的 flush 保留、
+    对底层的 close 拦下——否则 BytesIO 被关死，缓存输出再也读不回来。"""
+    def close(self):
+        pass
+
+class _StreamCap:
+    """worker 线程里的 stdout 代理：整行实时转发到 GUI 日志队列（长任务如 Whisper
+    听译能看到进度，不再"假死"）。兼容两类引擎脚本：
+    - 新脚本调用 sys.stdout.reconfigure(...) → no-op（str 直通，天然无编码问题）
+    - 旧脚本 sys.stdout = TextIOWrapper(sys.stdout.buffer, ...) → 落到 self.buffer
+      （BytesIO），跑完后按旧逻辑取末尾行，行为不变
+    """
+    def __init__(self, q):
+        self.q = q
+        self.lines = []                        # 已流出的整行（错误路径复用）
+        self.buffer = _NoCloseBytesIO()        # 旧引擎替换 stdout 后的落点
+        self._buf = ""
+
+    def write(self, s):
+        if not isinstance(s, str):
+            return len(s)
+        self._buf += s
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line = line.rstrip("\r")
+            if line.strip():
+                self.lines.append(line)
+                self.q.put(("log", "  | " + line))
+        return len(s)
+
+    def flush(self):
+        if self._buf.strip():
+            self.lines.append(self._buf.rstrip())
+            self.q.put(("log", "  | " + self._buf.rstrip()))
+        self._buf = ""
+
+    def reconfigure(self, **kw):     # 新引擎的 utf-8 reconfigure 在代理上无意义
+        pass
+
+    def buf_tail(self, n=6):
+        """旧引擎通道（BytesIO）末尾行——成功路径只补这一通道，避免与流式重复。"""
+        try:
+            self.buffer.seek(0)
+            return [l for l in self.buffer.read().decode("utf-8", "replace").splitlines()
+                    if l.strip()][-n:]
+        except Exception:
+            return []
+
+    def tail(self, n=6):
+        """新旧两条通道合并取末尾 n 行。"""
+        lines = list(self.lines)
+        try:
+            self.buffer.seek(0)
+            lines += [l for l in self.buffer.read().decode("utf-8", "replace").splitlines()
+                      if l.strip()]
+        except Exception:
+            pass
+        return [l for l in lines if l.strip()][-n:]
 
 class Pipe:
     """三段式管线；cb(stage, done, total, note)；log(msg)"""
@@ -1559,13 +1620,21 @@ class App:
     def on_drop(self, path):
         path = path.strip().strip('"')
         if not path.lower().endswith(".json"):
-            # 不是 json → 尝试引擎识别（目录或 exe）
+            # 不是 json → 尝试引擎识别（目录 / exe / 字幕 / 音视频 / 漫画档）
             eng, name, ok, reason = mt_config.detect_engine(path)
             if ok:
                 extract = mt_config.engine_extractor(eng)
                 if extract:
-                    # 记录游戏信息（后续回写用）并切到游戏汉化页
-                    self.game_path = path if os.path.isdir(path) else os.path.dirname(path)
+                    # 记录游戏信息（后续回写用）并切到游戏汉化页。
+                    # 字幕/媒体/漫画文件：只处理拖进来的这一个文件；exe 等其余：按目录
+                    if os.path.isdir(path):
+                        self.game_path = path
+                    elif path.lower().endswith((".srt", ".vtt", ".ass", ".ssa")
+                                               + mt_config._MEDIA_EXTS
+                                               + mt_config._COMIC_ARCHIVES):
+                        self.game_path = path
+                    else:
+                        self.game_path = os.path.dirname(path)
                     self.game_engine = eng
                     self.game_extract_script = extract
                     self.apply_script = mt_config.engine_applier(eng)
@@ -1577,6 +1646,10 @@ class App:
                     # Unity 引擎需检查 UnityPy
                     if eng == "unity":
                         if not self._check_and_install_unitypy():
+                            return
+                    # 音视频听译需检查 faster-whisper
+                    if eng == "media":
+                        if not self._check_and_install_fw():
                             return
                     if messagebox.askyesno(
                             f"✅ {name}",
@@ -1640,6 +1713,37 @@ class App:
             "请手动运行 / Please run manually:\n  pip install UnityPy")
         return False
 
+    def _check_and_install_fw(self):
+        """检测 faster-whisper；缺失时弹窗询问是否自动安装。返回 True=可用。"""
+        if mt_config.check_fasterwhisper():
+            return True
+        answer = messagebox.askyesno(
+            "faster-whisper Required / 需要安装 faster-whisper",
+            "音视频听译需要 faster-whisper 库（当前未检测到）。\n"
+            "Video/audio transcription requires faster-whisper (not found).\n\n"
+            "是否自动安装？（需要 Python 和 pip，约 150MB；\n"
+            "首次听译还会自动下载语音模型，small 档约 244MB，之后有缓存）\n"
+            "Install automatically? (~150MB via pip; a speech model\n"
+            "(~244MB for 'small') is downloaded on first transcription, then cached)")
+        if not answer:
+            self.log("[media] 用户取消安装 faster-whisper")
+            return False
+        self.log("[media] 正在安装 faster-whisper…（可能需要几分钟）")
+        self.stage_var.set("Installing faster-whisper…")
+        self.bar["value"] = 10
+        self.root.update()
+        ok, msg = mt_config.install_fasterwhisper()
+        if ok:
+            self.log("[media] faster-whisper 安装成功 ✓")
+            self.stage_var.set("faster-whisper installed ✓")
+            return True
+        self.log(f"[media] 安装失败: {msg}")
+        messagebox.showerror(
+            "Install Failed / 安装失败",
+            f"faster-whisper 安装失败:\n{msg}\n\n"
+            "请手动运行 / Please run manually:\n  pip install faster-whisper")
+        return False
+
     def _resolve_script(self, script):
         """定位引擎脚本：打包 exe 优先查 PyInstaller 数据区(_MEIPASS)，其次 exe 旁，最后源码目录"""
         cands = []
@@ -1667,12 +1771,10 @@ class App:
         self.stage_var.set("提取中… / Extracting…")
         self.bar["value"] = 0
         def worker():
-            import importlib.util, io as _io
-            captured = []
-            buf = _io.BytesIO()
-            cap = _io.TextIOWrapper(buf, encoding="utf-8")   # 持强引用：脚本替换
-            old_argv = sys.argv                              # sys.stdout 也不致被
-            old_stdout = sys.stdout                          # GC 关闭底层流
+            import importlib.util
+            cap = _StreamCap(self.q)    # stdout 代理：整行实时进日志区（听译长任务可见进度）
+            old_argv = sys.argv
+            old_stdout = sys.stdout
             try:
                 mod_name = script.replace(".py", "")
                 spec = importlib.util.spec_from_file_location(mod_name, script_path)
@@ -1683,12 +1785,7 @@ class App:
                 mod.main()
                 sys.argv = old_argv
                 sys.stdout = old_stdout
-                try:
-                    buf.seek(0)
-                    captured = buf.read().decode("utf-8", "replace").strip().splitlines()
-                except Exception:
-                    pass
-                for line in captured[-6:]:
+                for line in cap.buf_tail():   # 旧引擎替换 stdout 的输出补末尾；新引擎为空
                     self.log(f"  | {line}")
                 # 找最新生成的提取产物（引擎命名不一：<game>_extracted.json /
                 # game.extracted.json / <game>.extracted.json，统配 [_.]）
@@ -1700,16 +1797,11 @@ class App:
                     self.q.put(("extracted", newest))
                 else:
                     self.q.put(("error", "提取完成但未找到输出文件: " +
-                                ("; ".join(captured[-3:]) if captured else "no output")))
+                                ("; ".join(cap.tail(3)) or "no output")))
             except SystemExit:
                 sys.stdout = old_stdout
                 sys.argv = old_argv
-                try:
-                    buf.seek(0)
-                    captured = buf.read().decode("utf-8", "replace").strip().splitlines()
-                except Exception:
-                    pass
-                msg = "\n".join(captured[-5:]) if captured else "提取脚本退出（无输出）"
+                msg = "\n".join(cap.tail(5)) or "提取脚本退出（无输出）"
                 self.q.put(("error", msg))
             except Exception:
                 sys.stdout = old_stdout
@@ -1717,17 +1809,25 @@ class App:
                 self.q.put(("error", traceback.format_exc()[-800:]))
             finally:
                 try:
-                    cap.close()
+                    cap.flush()
                 except Exception:
                     pass
         threading.Thread(target=worker, daemon=True).start()
 
     def pick(self):
-        p = filedialog.askopenfilename(title=self.T("sel_file"),
-                                       filetypes=[("JSON", "*.json"), ("Executable", "*.exe"),
-                                                  ("All files", "*.*")])
+        p = filedialog.askopenfilename(
+            title=self.T("sel_file"),
+            filetypes=[("JSON / MTool", "*.json"),
+                       ("Games 游戏 / EXE", "*.exe"),
+                       ("Subtitles 字幕", "*.srt *.ass *.ssa *.vtt"),
+                       ("Video 视频", "*.mp4 *.mkv *.avi *.mov *.ts *.webm *.wmv"),
+                       ("Audio 音频", "*.mp3 *.wav *.m4a *.flac *.ogg *.opus"),
+                       ("Comics 漫画", "*.cbz *.cbr *.cb7"),
+                       ("All files 全部", "*.*")])
         if not p:
-            p = filedialog.askdirectory(title="Select game folder / 游戏目录")
+            self.log("文件选择已取消——接下来选文件夹 / File dialog cancelled — pick a folder next")
+            p = filedialog.askdirectory(
+                title="Select folder 文件夹（游戏/字幕/视频/漫画均可）/ any folder")
         if p:
             self.on_drop(p)
 
@@ -1859,10 +1959,8 @@ class App:
         for b in (self.apply_btn, self.mtool_btn, self.g_extract_btn):
             b.config(state="disabled")
         def worker():
-            import importlib.util, io as _io, glob as g
-            captured = []
-            buf = _io.BytesIO()
-            cap = _io.TextIOWrapper(buf, encoding="utf-8")   # 持强引用防 GC 关流
+            import importlib.util
+            cap = _StreamCap(self.q)    # stdout 代理：整行实时进日志区
             old_argv = sys.argv
             old_stdout = sys.stdout
             try:
@@ -1878,12 +1976,7 @@ class App:
                     mod.apply_all()
                 sys.stdout = old_stdout
                 sys.argv = old_argv
-                try:
-                    buf.seek(0)
-                    captured = buf.read().decode("utf-8", "replace").strip().splitlines()
-                except Exception:
-                    pass
-                for line in captured[-6:]:
+                for line in cap.buf_tail():   # 旧引擎替换 stdout 的输出补末尾；新引擎为空
                     self.log(f"  | {line}")
                 self.bar["value"] = 100
                 self.stage_var.set("✅ 已导入游戏 / Applied to Game")
@@ -1891,12 +1984,7 @@ class App:
             except SystemExit:
                 sys.stdout = old_stdout
                 sys.argv = old_argv
-                try:
-                    buf.seek(0)
-                    captured = buf.read().decode("utf-8", "replace").strip().splitlines()
-                except Exception:
-                    pass
-                msg = "\n".join(captured[-5:]) if captured else "apply 脚本退出"
+                msg = "\n".join(cap.tail(5)) or "apply 脚本退出"
                 self.q.put(("error", msg))
             except Exception:
                 sys.stdout = old_stdout
@@ -1904,7 +1992,7 @@ class App:
                 self.q.put(("error", traceback.format_exc()[-800:]))
             finally:
                 try:
-                    cap.close()
+                    cap.flush()
                 except Exception:
                     pass
         threading.Thread(target=worker, daemon=True).start()
