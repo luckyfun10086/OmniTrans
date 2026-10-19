@@ -48,3 +48,4 @@ library.json
 
 # 修复脚本产生的译文备份
 *_translated.json.bak
+*.bak2

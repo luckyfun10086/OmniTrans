@@ -371,15 +371,18 @@ same-name `.srt` are reused as-is. Progress streams live into the GUI log.
 ### Comics (image folders / CBZ)
 
 Drop a folder of page images or a `.cbz` — recognized as the *Comics*
-engine. OCR line boxes are clustered into **bubble-level regions** (adjacent
-vertical columns merge, calibrated on real manga: same-bubble gaps ≈8px vs
-cross-bubble ≈30px), so each bubble becomes one full-sentence entry instead
-of fragmented columns. After translation, `comic_apply.py` lettering-renders
-each bubble: a rounded rectangle filled with the border-sampled color
-(bubbles ≈ white), then the auto-sized translation — tall bubbles with zh/ja
-text render vertically (columns right-to-left). Symbol-only regions (♪ etc.)
-are neither translated nor touched. Output is non-destructive: a sibling
-`name.zh/` folder, or `name.zh.cbz` for archives.
+engine. Detection runs the full page **plus two upscaled full-width slices**
+(high-resolution pages get downscaled by the detector and drop whole columns
+of small text — verified against real manga); OCR line boxes are clustered
+into **bubble-level regions** (adjacent vertical columns merge, calibrated on
+real manga: same-bubble gaps ≈8px vs cross-bubble ≈30px), so each bubble
+becomes one full-sentence entry instead of fragmented columns. After
+translation, `comic_apply.py` lettering-renders each bubble: a rounded
+rectangle filled with the border-sampled color (bubbles ≈ white), then the
+auto-sized translation — tall bubbles with zh/ja text render vertically
+(columns right-to-left). Symbol-only regions (♪ etc.) are neither translated
+nor touched. Output is non-destructive: a sibling `name.zh/` folder, or
+`name.zh.cbz` for archives.
 
 - Dependencies: `pip install rapidocr-onnxruntime Pillow` (GUI prompts on
   first use); the font is picked from system CJK fonts, override via

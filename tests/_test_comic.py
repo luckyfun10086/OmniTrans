@@ -70,6 +70,30 @@ class FakeOCR:
 
 ce.lib._OCR = FakeOCR()      # 注入 comic_extract 实际使用的 comic_lib 实例，不 import rapidocr
 
+# ---------- 单元：分块检测触发（高分页 1 整页 + 2 竖切，小图只跑整页） ----------
+calls = {"n": 0}
+class CountOCR(FakeOCR):
+    def __call__(self, target):
+        calls["n"] += 1
+        return [], []
+_Countlib = ce.lib
+_prev = _Countlib._OCR
+_Countlib._OCR = CountOCR()
+try:
+    small = Image.new("RGB", (800, 1000), (255, 255, 255))
+    sb = io.BytesIO(); small.save(sb, "PNG")
+    calls["n"] = 0
+    _Countlib.ocr_regions(sb.getvalue())
+    assert calls["n"] == 1, calls["n"]                  # 小图不分块
+    big = Image.new("RGB", (1400, 2000), (255, 255, 255))
+    bb = io.BytesIO(); big.save(bb, "PNG")
+    calls["n"] = 0
+    _Countlib.ocr_regions(bb.getvalue())
+    assert calls["n"] == 3, calls["n"]                  # 整页 + 竖切两块
+    print("分块检测 ✓  高分页触发整页+竖切双跑（小图只跑整页）")
+finally:
+    _Countlib._OCR = _prev
+
 # ---------- ① 单元：聚类规则 ----------
 two_cols = cl.cluster_regions([{"box": [300, 100, 350, 500], "text": "左列"},
                                {"box": [365, 100, 415, 500], "text": "右列"}])

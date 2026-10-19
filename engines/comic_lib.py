@@ -105,22 +105,60 @@ def enhance_with_mocr(clusters, target):
     return clusters
 
 def ocr_regions(target):
-    """对一张页做 OCR。target = 文件路径或图片 bytes。
-    返回 [{"box":[x1,y1,x2,y2], "text": str}]，过滤低分/过小/无字条目。"""
-    result, _ = get_ocr()(target)
-    out = []
-    for item in result or []:
-        box, text, conf = item[0], str(item[1]), float(item[2] or 0)
+    """对一张页做 OCR（整页 + 分块放大双重检测，框取并集）。
+    target = 文件路径或图片 bytes。高分辨率页上整页检测会把图缩到检测上限，
+    小字/艺术字/标题成为盲区（实测漏掉整列竖排）；分块放大 1.5x 补上，
+    相邻碎列由 cluster_regions 拼回、manga-ocr 对合并框整句重识别。
+    返回 [{"box":[x1,y1,x2,y2], "text": str}]，过滤低分/过小条目。"""
+    from PIL import Image
+    if isinstance(target, bytes):
+        img = Image.open(io.BytesIO(target)).convert("RGB")
+    else:
+        img = Image.open(target).convert("RGB")
+    W, H = img.size
+    items = list(get_ocr()(target)[0] or [])
+    if max(W, H) > 1200:
+        items += _ocr_tiled(img)
+    # 中心距去重（整页结果优先，分块补漏）
+    out, seen = [], []
+    for box, text, conf in sorted(
+            [(i[0], str(i[1]), float(i[2] or 0)) for i in items],
+            key=lambda t: -t[2]):
         if conf < 0.5 or not text.strip():
             continue
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
+        cx, cy = sum(xs) / 4, sum(ys) / 4
+        if any((cx - px) ** 2 + (cy - py) ** 2 < 30 ** 2 for px, py in seen):
+            continue
+        seen.append((cx, cy))
         r = {"box": [int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))],
              "text": text.strip()}
         if r["box"][2] - r["box"][0] < 8 or r["box"][3] - r["box"][1] < 8:
             continue
         out.append(r)
     return out
+
+def _ocr_tiled(img, scale=1.5, overlap=0.2):
+    """竖切两块（全宽、带重叠）各自放大后 OCR，框坐标映射回整页。
+    实测对竖排日漫的高分页盲区有效（整页检测把图缩到上限会漏整列小字）；
+    2×2 切法实测无效，勿改。"""
+    from PIL import Image
+    ocr = get_ocr()
+    W, H = img.size
+    ov = int(H * overlap)
+    tiles = [(0, 0, W, H // 2 + ov), (0, H // 2 - ov, W, H)]
+    items = []
+    for x1, y1, x2, y2 in tiles:
+        tile = img.crop((x1, y1, x2, y2))
+        tw, th = tile.size
+        tile = tile.resize((int(tw * scale), int(th * scale)), Image.LANCZOS)
+        buf = io.BytesIO()
+        tile.save(buf, "PNG")
+        for it in (ocr(buf.getvalue())[0] or []):
+            box = [[p[0] / scale + x1, p[1] / scale + y1] for p in it[0]]
+            items.append([box, it[1], it[2]])
+    return items
 
 # 判断是否含有可翻译内容（复用字幕引擎的词字符判定）
 _WORD_RE = re.compile(r"[0-9A-Za-z\u00c0-\u024f\u0370-\u03ff\u0400-\u04ff\u3040-\u30ff"
