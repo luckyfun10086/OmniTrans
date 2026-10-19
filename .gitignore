@@ -32,6 +32,9 @@ srpg_work/
 *_extracted*.json
 *.extracted.json
 unity_manifest.json
+# 字幕/漫画 sidecar（含台词与文本框，同理绝不上传）
+*_subs.json
+*_comic.json
 
 # Unity 沙箱
 _unity_sandbox/
