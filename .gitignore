@@ -45,3 +45,6 @@ _tq_mock.json
 rva_game_*_*.json
 *.rpyb
 library.json
+
+# 修复脚本产生的译文备份
+*_translated.json.bak
