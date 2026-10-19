@@ -50,7 +50,10 @@ def extract(path):
                     print(f"  ! 气泡补扫失败（不影响主流程）: {e}")
             for r in regions:
                 r["text"] = lib.clean_source(r["text"])   # 省略号归一（也提升去重）
-            regions = [r for r in regions if lib.has_word(r["text"])]
+            # 残片过滤：单字/半音节碎片（催/っ/ク/V/口…）是检测碎角料，
+            # 机翻成单字嵌进画面只会添乱；真气泡极少只有一个字
+            regions = [r for r in regions
+                       if lib.has_word(r["text"]) and len(r["text"]) >= 2]
         except ImportError:
             raise SystemExit("缺少 rapidocr-onnxruntime：请 pip install "
                              "rapidocr-onnxruntime（GUI 拖入漫画时会弹窗自动安装）")

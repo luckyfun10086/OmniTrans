@@ -36,11 +36,11 @@ if cl.find_font(20) is None:
 tmp = tempfile.mkdtemp(prefix="comic_")
 
 def make_page(path, boxes):
-    """白底页；boxes 里的区域涂黑（模拟气泡描边/底）"""
+    """白底页；boxes 画黑色描边圈（模拟气泡边框，内部留白供嵌字）"""
     img = Image.new("RGB", (400, 600), (255, 255, 255))
     d = ImageDraw.Draw(img)
     for b in boxes:
-        d.rectangle(b, fill=(20, 20, 20))
+        d.rectangle(b, outline=(20, 20, 20), width=6)
     img.save(path, "PNG")
     return open(path, "rb").read()
 

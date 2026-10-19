@@ -70,7 +70,22 @@ def main():
             txt = lib.clean_target(r["text"])
         return txt, bool(zh)
 
-    nreg = napplied = 0
+    nreg = napplied = nskip_frag = nskip_art = 0
+    def try_render(d, img, r):
+        """返回 (画了没, 是否用了译文)；残片与画面上的字直接跳过。"""
+        nonlocal nreg, napplied, nskip_frag, nskip_art
+        nreg += 1
+        if len(r["text"].strip()) < 2:            # 单字残片（催/っ/ク/口…）
+            nskip_frag += 1
+            return
+        if not lib.is_bubble_area(img, r["box"]):  # 字直接画在画面上：不嵌免得盖画面
+            nskip_art += 1
+            return
+        txt, zh = render_text(r)
+        if txt:
+            lib.draw_region(d, img, r["box"], txt, tl)
+            napplied += bool(zh)
+
     if src["src"].lower().endswith((".cbz", ".zip")):
         out_path = os.path.splitext(src["src"])[0] + f".{tl}.cbz"
         with zipfile.ZipFile(out_path, "w", zipfile.ZIP_STORED) as zout:
@@ -78,11 +93,7 @@ def main():
                 img = lib.load_page_image(pg)
                 d = ImageDraw.Draw(img)
                 for r in pg["regions"]:
-                    nreg += 1
-                    txt, zh = render_text(r)
-                    if txt:
-                        lib.draw_region(d, img, r["box"], txt, tl)
-                        napplied += bool(zh)
+                    try_render(d, img, r)
                 data, _ = lib.page_bytes(pg, img)
                 zout.writestr(pg["ref"], data)
     else:
@@ -92,11 +103,7 @@ def main():
             img = lib.load_page_image(pg)
             d = ImageDraw.Draw(img)
             for r in pg["regions"]:
-                nreg += 1
-                txt, zh = render_text(r)
-                if txt:
-                    lib.draw_region(d, img, r["box"], txt, tl)
-                    napplied += bool(zh)
+                try_render(d, img, r)
             rel = os.path.relpath(pg["ref"], src["src"])
             data, ext = lib.page_bytes(pg, img)
             dstf = os.path.join(out_path, rel)
@@ -105,7 +112,7 @@ def main():
             with open(root + ext, "wb") as f:
                 f.write(data)
     lib.close_zips()
-    print(f"嵌字完成：{napplied}/{nreg} 处已翻译，其余按原文重绘；"
+    print(f"嵌字完成：{napplied}/{nreg} 处已翻译；跳过残片 {nskip_frag}、画面上的字 {nskip_art}；"
           f"输出 {len(pages)} 页 → {out_path}（原文件未改动）")
 
 if __name__ == "__main__":

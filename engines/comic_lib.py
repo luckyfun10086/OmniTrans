@@ -537,6 +537,22 @@ def _h_fits(draw, box, text, font, size):
     lines = _h_layout(draw, text, font, (x2 - x1) - pad * 2)
     return _hlh(size) * len(lines) <= (y2 - y1) - pad * 2
 
+def is_bubble_area(img, box):
+    """气泡/旁白框判定：白底黑字是双峰分布——高亮(≥200)为主、中灰(100-190)很少；
+    画面/网点以中灰调为主。密集竖排文字墨水可占三四成亮度，故高亮阈值放低、
+    用中灰占比做主判据。深底气泡（黑底白字）按用户要求不嵌。"""
+    x1, y1, x2, y2 = [int(v) for v in box]
+    x1, y1 = max(0, x1 + 2), max(0, y1 + 2)
+    x2, y2 = min(img.width, x2 - 2), min(img.height, y2 - 2)
+    if x2 - x1 < 4 or y2 - y1 < 4:
+        return False
+    g = img.crop((x1, y1, x2, y2)).convert("L")
+    h = g.histogram()
+    total = g.width * g.height
+    light = sum(h[200:]) / total
+    mid = sum(h[100:190]) / total
+    return light >= 0.5 and mid <= 0.35
+
 def draw_region(draw, img, box, text, tl):
     """填充框底色并排版绘制文本。竖长框 + 中日文 → 竖排。
     填充用圆角矩形并向外扩 3px 盖住原字边缘残墨。"""
