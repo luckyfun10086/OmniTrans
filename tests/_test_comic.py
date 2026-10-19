@@ -94,6 +94,30 @@ try:
 finally:
     _Countlib._OCR = _prev
 
+# ---------- 单元：白色气泡补扫（几何 + 验证逻辑） ----------
+synth = Image.new("RGB", (600, 800), (120, 120, 120))       # 灰底=画面
+d2 = ImageDraw.Draw(synth)
+d2.ellipse((50, 60, 300, 320), fill=(250, 250, 250))        # 白气泡
+f30 = cl.find_font(30) or cl.find_font(20)
+d2.text((100, 130), "こんにちは", font=f30, fill=(0, 0, 0))
+d2.text((100, 190), "せかいです", font=f30, fill=(0, 0, 0))
+boxes = cl.find_bubbles(synth)
+assert any(40 <= b[0] <= 70 and 50 <= b[1] <= 90 and 290 <= b[2] <= 320 for b in boxes), boxes
+
+class MocrSeq:                                              # 按调用次序返回预设读数
+    def __init__(self, reads):
+        self.reads, self.i = list(reads), 0
+    def __call__(self, crop):
+        r = self.reads[min(self.i, len(self.reads) - 1)]
+        self.i += 1
+        return r
+
+bb = (50, 60, 300, 320)
+assert cl.verify_blob(MocrSeq(["こんにちは世界", "こんにちは世界"]), synth, bb) == "こんにちは世界"
+assert cl.verify_blob(MocrSeq(["そういうことで、", "そして、"]), synth, bb) is None   # 幻觉短语
+assert cl.verify_blob(MocrSeq(["本日は晴天なり", "ぜんぜん違う"]), synth, bb) is None  # 双读不一致
+print("气泡补扫 ✓  白色连通域命中 / 双读一致收 / 幻觉·不一致拒")
+
 # ---------- ① 单元：聚类规则 ----------
 two_cols = cl.cluster_regions([{"box": [300, 100, 350, 500], "text": "左列"},
                                {"box": [365, 100, 415, 500], "text": "右列"}])

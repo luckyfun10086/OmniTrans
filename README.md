@@ -373,7 +373,9 @@ same-name `.srt` are reused as-is. Progress streams live into the GUI log.
 Drop a folder of page images or a `.cbz` — recognized as the *Comics*
 engine. Detection runs the full page **plus two upscaled full-width slices**
 (high-resolution pages get downscaled by the detector and drop whole columns
-of small text — verified against real manga); OCR line boxes are clustered
+of small text), plus a **white-bubble connected-component sweep** with
+dual-read manga-ocr consistency verification (and a hallucination-phrase
+blocklist) to catch bubbles the detector is entirely blind to; OCR line boxes are clustered
 into **bubble-level regions** (adjacent vertical columns merge, calibrated on
 real manga: same-bubble gaps ≈8px vs cross-bubble ≈30px), so each bubble
 becomes one full-sentence entry instead of fragmented columns. After

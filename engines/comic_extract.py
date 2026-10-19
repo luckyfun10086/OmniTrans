@@ -38,11 +38,16 @@ def extract(path):
             lines = [r for r in lib.ocr_regions(target)
                      if lib.has_word(r["text"])]
             regions = lib.cluster_regions(lines)    # 行级 → 气泡级（合并竖排列）
-            if regions and lib.hybrid_enabled():
-                try:
-                    regions = lib.enhance_with_mocr(regions, target)
-                except ImportError:
-                    print("  ! manga-ocr 未安装，回退 rapidocr 识别文本")
+            if lib.hybrid_enabled():
+                if regions:
+                    try:
+                        regions = lib.enhance_with_mocr(regions, target)
+                    except ImportError:
+                        print("  ! manga-ocr 未安装，回退 rapidocr 识别文本")
+                try:                         # 第三通道：检测器盲区里的白色气泡
+                    regions += lib.find_text_bubbles(target, regions)
+                except Exception as e:
+                    print(f"  ! 气泡补扫失败（不影响主流程）: {e}")
             for r in regions:
                 r["text"] = lib.clean_source(r["text"])   # 省略号归一（也提升去重）
             regions = [r for r in regions if lib.has_word(r["text"])]

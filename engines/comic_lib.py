@@ -104,6 +104,108 @@ def enhance_with_mocr(clusters, target):
             r["text"] = t
     return clusters
 
+# ---------------- 白色气泡补扫（第三检测通道，仅混合模式） ----------------
+# 实测：部分对话气泡（深底/艺术字/跨列）对检测器完全隐形（多尺度多切法+负片均无效），
+# 但气泡本体是大块纯白连通域。白色连通域找候选 → manga-ocr 双读一致才收，
+# 幻觉短语黑名单拦"在网点/画面上编出通用连接词"的假阳性。
+_JA_RE = re.compile(r"[ぁ-んァ-ヶ一-龯]")
+_HALLU = {"そういうことで、", "そういえば、", "そして、", "これは、", "しかし、",
+          "ここで", "それは、", "さてさて、", "うん．．．", "いや．．．",
+          "できて、そういう", "こういう", "これからの"}
+
+def find_bubbles(img):
+    """白色连通域 → 气泡候选框（纯 numpy，无新依赖）。返回 [box,...]。"""
+    import numpy as np
+    from PIL import Image
+    W, H = img.size
+    scale = 2 if max(W, H) > 1600 else 1
+    small = np.asarray(img.convert("L").resize((W // scale, H // scale), Image.LANCZOS))
+    h, w = small.shape
+    mask = small > 232
+    parent = list(range(h * w))
+
+    def find(i):
+        r = i
+        while parent[r] != r:
+            r = parent[r]
+        while parent[i] != r:
+            parent[i], i = r, parent[i]
+        return r
+
+    ys_, xs_ = np.where(mask)
+    for y, x in zip(ys_.tolist(), xs_.tolist()):
+        i = y * w + x
+        if x + 1 < w and mask[y, x + 1]:
+            parent[find(i)] = find(i + 1)
+        if y + 1 < h and mask[y + 1, x]:
+            parent[find(i)] = find(i + w)
+    from collections import defaultdict
+    comps = defaultdict(list)
+    for y, x in zip(ys_.tolist(), xs_.tolist()):
+        comps[find(y * w + x)].append((y, x))
+    out = []
+    page_area = (W // scale) * (H // scale)
+    for pts in comps.values():
+        if len(pts) < (110 // scale) * (110 // scale):
+            continue
+        ys = [p[0] for p in pts]
+        xs = [p[1] for p in pts]
+        y1, y2, x1, x2 = min(ys), max(ys), min(xs), max(xs)
+        bw, bh = x2 - x1 + 1, y2 - y1 + 1
+        if bw * scale < 100 or bh * scale < 100:
+            continue
+        if len(pts) > 0.25 * page_area:
+            continue                       # 整页留白/背景
+        fill = len(pts) / (bw * bh)
+        if fill < 0.45:
+            continue                       # 白色占比太低是画面高光不是气泡
+        ink = float((small[y1:y2 + 1, x1:x2 + 1] < 120).mean())
+        if not (0.02 < ink < 0.45):
+            continue                       # 无墨=空白；墨过浓=密集画面
+        out.append([x1 * scale, y1 * scale, (x2 + 1) * scale, (y2 + 1) * scale])
+    return out
+
+def verify_blob(mocr, img, box):
+    """manga-ocr 双读（全框/内缩）一致且非幻觉短语 → 返回文本，否则 None。"""
+    import difflib
+    x1, y1, x2, y2 = box
+    try:
+        a = str(mocr(img.crop(box))).strip()
+        dx, dy = int((x2 - x1) * 0.08) + 4, int((y2 - y1) * 0.08) + 4
+        b = str(mocr(img.crop((x1 + dx, y1 + dy, x2 - dx, y2 - dy)))).strip()
+    except Exception:
+        return None
+    if not all(len(t) >= 2 and _JA_RE.search(t) for t in (a, b)):
+        return None
+    if a in _HALLU or b in _HALLU:
+        return None
+    if difflib.SequenceMatcher(None, a, b).ratio() < 0.6:
+        return None
+    return a
+
+def find_text_bubbles(target, existing_regions):
+    """检测器盲区兜底：白色气泡补扫 + manga-ocr 验证。
+    仅在混合模式下由提取端调用（验证依赖 mocr）。返回新增区域列表。"""
+    from PIL import Image
+    import numpy as np
+    if isinstance(target, bytes):
+        img = Image.open(io.BytesIO(target)).convert("RGB")
+    else:
+        img = Image.open(target).convert("RGB")
+    mocr = get_mocr()
+    out = []
+    for box in find_bubbles(img):
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        if any(r["box"][0] - 30 <= cx <= r["box"][2] + 30 and
+               r["box"][1] - 30 <= cy <= r["box"][3] + 30
+               for r in existing_regions):
+            continue                       # 已有区域覆盖（中心点判定）
+        text = verify_blob(mocr, img, box)
+        if text and has_word(text):
+            out.append({"box": box, "text": text})
+            print(f"    ＋气泡补扫: {text[:24]}")
+    return out
+
 def ocr_regions(target):
     """对一张页做 OCR（整页 + 分块放大双重检测，框取并集）。
     target = 文件路径或图片 bytes。高分辨率页上整页检测会把图缩到检测上限，
