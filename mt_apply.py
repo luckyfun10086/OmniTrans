@@ -55,8 +55,11 @@ def unmask_val(s):
 VALID_NEXT = set('nNvVcCiIpPGFSfuwMLjsbot' + chr(92) + '{}<>|.^^$[]()')
 
 ok = drop_tok = drop_nl = empty = 0
-out = dict(orig)  # 保留原有已翻译条目
+# 保留原有已翻译条目（顺带修复历史批量解析污染：\"['译文','ja']\" → 译文）
+out = {k: mt_config.repair_value(v) for k, v in orig.items()}
 for k, v in data.items():
+    v = mt_config.repair_value(v)
+    data[k] = v
     if not (isinstance(v, str) and v.strip()):
         empty += 1
         continue

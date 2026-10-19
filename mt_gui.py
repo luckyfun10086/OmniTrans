@@ -499,7 +499,13 @@ class Pipe:
                 with self._open(u) as r:
                     d = json.loads(r.read().decode("utf-8", "replace"))
                 if isinstance(d, list) and len(d) == len(qs):
-                    return [str(x) for x in d]
+                    out = []
+                    for x in d:
+                        if isinstance(x, list) and x and isinstance(x[0], str):
+                            out.append(x[0])    # [译文, 检测语言]
+                        else:
+                            out.append(x if isinstance(x, str) else str(x))
+                    return out
                 raise ValueError("shape")
             except Cancel:
                 raise
@@ -667,6 +673,8 @@ class Pipe:
             ok = drop_tok = drop_nl = 0
             result = {}
             for k, v in list(masked.items()):
+                v = mt_config.repair_value(v)   # 修复历史批量解析污染值
+                masked[k] = v
                 if not (isinstance(v, str) and v.strip()):
                     continue
                 ktoks = tokre.findall(k)
@@ -691,7 +699,7 @@ class Pipe:
             self.log(self.L["log_seg"])
             masked = self.translate(masked, seg=True)
         orig = mt_config.load_loose_json(self.src)
-        out = dict(orig)
+        out = {k: mt_config.repair_value(v) for k, v in orig.items()}
         for k, zh in result.items():
             out[key_of(k)] = zh
         dst = os.path.splitext(self.src)[0] + "_translated.json"

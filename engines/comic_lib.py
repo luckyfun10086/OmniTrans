@@ -291,8 +291,8 @@ _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]")
 # 'では．．'/'では．．．' 去重成同一条）；译文绘制前剥掉两端装饰符号。
 
 _ELLI_RUN = re.compile(r"[．。]{2,}|\.{3,}")
-# 两端可剥的装饰：角引号/省略号/句读（成对循环剥，保留 ？！～♡ 等语气符）
-_EDGE_STRIP = "「」『』【】《》〈〉〔〕[]\"'“”‘’…．。，、,.、"
+# 两端可剥的装饰：角引号/圆方括号/省略号/句读/破折号（成对循环剥，保留 ？！～♡ 等语气符）
+_EDGE_STRIP = "「」『』【】《》〈〉〔〕[]［］（）()\"'“”‘’…．。，、,.—―ー"
 
 def clean_source(t):
     """OCR 文本入词典前：省略号归一为 ……，去首尾空白。"""
@@ -356,12 +356,10 @@ def _draw_h(draw, box, text, font, size, color):
     lines = _h_layout(draw, text, font, w - pad * 2)
     lh = _hlh(size)
     th = lh * len(lines)
-    sw = max(1, size // 12)
     y = y1 + max(pad, (h - th) // 2)
     for ln in lines:
         lw = draw.textlength(ln, font=font)
-        draw.text((x1 + max(pad, (w - lw) // 2), y), ln, font=font, fill=color,
-                  stroke_width=sw, stroke_fill=color)
+        draw.text((x1 + max(pad, (w - lw) // 2), y), ln, font=font, fill=color)
         y += lh
 
 def _draw_v(draw, box, text, font, size, color):
@@ -375,7 +373,6 @@ def _draw_v(draw, box, text, font, size, color):
     per = max(1, int((h - pad * 2) // ch))
     ncols = (len(chars) + per - 1) // per
     tw = colw * ncols
-    sw = max(1, size // 12)
     x = x2 - pad - colw - max(0, (w - tw) // 2)
     for j in range(ncols):
         col = chars[j * per:(j + 1) * per]
@@ -383,7 +380,7 @@ def _draw_v(draw, box, text, font, size, color):
         for c in col:
             cw = draw.textlength(c, font=font)
             draw.text((x + (colw - size) // 2 + (size - cw) // 2, y), c,
-                      font=font, fill=color, stroke_width=sw, stroke_fill=color)
+                      font=font, fill=color)
             y += ch
         x -= colw
 

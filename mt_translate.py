@@ -89,7 +89,13 @@ def mt_batch(qs, tries=5):
             with urllib.request.urlopen(req, timeout=30) as r:
                 d = json.loads(r.read().decode("utf-8", "replace"))
             if isinstance(d, list) and len(d) == len(qs):
-                return [str(x) for x in d]
+                out = []
+                for x in d:
+                    if isinstance(x, list) and x and isinstance(x[0], str):
+                        out.append(x[0])        # [译文, 检测语言]
+                    else:
+                        out.append(x if isinstance(x, str) else str(x))
+                return out
             raise ValueError("shape mismatch")
         except Exception:
             if a == tries - 1:

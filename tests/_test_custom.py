@@ -189,4 +189,15 @@ print('敏感词→机翻兜底 ✓  fallback_saved =', pipe.fallback_saved)
 shutil.rmtree(tmp)
 srv4.shutdown()
 srv3.shutdown()
+
+# 谷歌端点改版回归（实测 2026-10：每条 [译文, 检测语言]）+ 历史污染修复
+assert mt_config.parse_response('[["你好","en"]]') == '你好'
+assert mt_config.parse_response('[["你好","en"],["谢谢","en"]]') == '你好谢谢'
+assert mt_config.parse_response('["你好","en"]') == '你好'
+assert mt_config.parse_response('["你好"]') == '你好'
+assert mt_config.repair_value("['你好', 'ja']") == '你好'
+assert mt_config.repair_value('正常译文') == '正常译文'
+assert mt_config.repair_value('[音乐]') == '[音乐]'
+print('谷歌新格式解析 + 污染修复 OK')
+
 print('ALL TESTS PASS')

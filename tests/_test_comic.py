@@ -94,7 +94,12 @@ assert cl.clean_target("「你好……。」") == "你好"
 assert cl.clean_target("……开始") == "开始"
 assert cl.clean_target("真的吗？！") == "真的吗？！"
 assert cl.clean_target("『最高』……") == "最高"
-print("文本清洗 ✓  省略号归一 / 两端引号句读剥除，语气符 ？！ 保留")
+# 历史污染修复：谷歌端点改版后旧解析产生的 \"['译文','ja']\" 形态
+assert mt_config.repair_value("['你好呀。', 'ja']") == "你好呀。"
+assert mt_config.repair_value("正常译文") == "正常译文"
+assert mt_config.repair_value("[音乐]") == "[音乐]"          # 无引号形态不误伤
+assert cl.clean_target(mt_config.repair_value("['「测试」', 'zh-CN']")) == "测试"
+print("文本清洗 ✓  省略号归一 / 引号句读剥除 / 语气符保留 / 污染值修复")
 
 # ---------- 单元：竖排渲染不越框 ----------
 img = Image.new("RGB", (600, 600), (255, 255, 255))

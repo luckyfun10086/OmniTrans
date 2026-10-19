@@ -63,9 +63,9 @@ def main():
         return v.strip() if isinstance(v, str) else ""
 
     def render_text(r):
-        """译文优先，绘制前清洗两端装饰符号；洗成空串则保持原样不嵌。"""
+        """译文优先；绘制前先修复历史污染值（\"['译文','ja']\"）再清洗两端装饰。"""
         zh = pick(r["text"])
-        txt = lib.clean_target(zh) if zh else ""
+        txt = lib.clean_target(mt_config.repair_value(zh)) if zh else ""
         if not txt:
             txt = lib.clean_target(r["text"])
         return txt, bool(zh)

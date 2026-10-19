@@ -761,8 +761,19 @@ def parse_response(raw):
     except Exception:
         return raw  # 纯文本
     if isinstance(d, list):
+        # 谷歌 dict-chrome-ex 现行格式：每项 [译文, 检测语言] → 取译文
         if d and isinstance(d[0], list):
-            return "".join(x[0] if isinstance(x, list) else str(x) for x in d[0])
+            out = []
+            for x in d:
+                if isinstance(x, list) and x:
+                    v = x[0]
+                    out.append(v if isinstance(v, str) else "".join(str(i) for i in v))
+                else:
+                    out.append(str(x))
+            return "".join(out)
+        # 扁平列表：剥掉尾部的检测语言码（["译文","ja"] 变体兼容）
+        if len(d) >= 2 and re.fullmatch(r"[a-z]{2}(?:-[A-Za-z0-9]+){0,2}", str(d[-1])):
+            d = d[:-1]
         return "".join(str(x) for x in d)
     if isinstance(d, dict):
         # OpenAI 兼容 chat/completions
@@ -788,3 +799,15 @@ def parse_response(raw):
             if isinstance(d.get(k), str):
                 return d[k]
     return raw
+
+# ---------- 历史污染修复 ----------
+# 谷歌端点改版后，旧的批量解析把每条 [译文, 检测语言] 整只 str() 成了
+# "['译文', 'ja']"。repair_value 修复存量译文数据（新数据不会再产生该形态）。
+_QUOTED_RE = re.compile(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"")
+
+def repair_value(v):
+    """\"['译文', 'ja']\" → \"译文\"；非该形态原样返回（绝不误伤方括号正常译文）。"""
+    if not isinstance(v, str) or not (v.startswith("[") and v.endswith("]")):
+        return v
+    parts = [a or b for a, b in _QUOTED_RE.findall(v[1:-1])]
+    return parts[0] if parts else v
