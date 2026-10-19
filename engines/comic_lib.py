@@ -55,6 +55,55 @@ def get_ocr():
         _OCR = RapidOCR()
     return _OCR
 
+# ---------------- manga-ocr 混合识别（日漫专用，可选） ----------------
+# rapidocr 通用模型检测框可靠，但竖排日文识别很差（实测乱码）；
+# 装了 manga-ocr 就自动启用混合模式：框用 rapidocr，整气泡裁片交给 manga-ocr 重识别。
+_MOCR = None
+
+def get_mocr():
+    global _MOCR
+    if _MOCR is None:
+        from manga_ocr import MangaOcr
+        print("加载 manga-ocr 模型（首次运行自动下载，约 440MB）…")
+        _MOCR = MangaOcr()
+    return _MOCR
+
+def mocr_available():
+    import importlib.util
+    return importlib.util.find_spec("manga_ocr") is not None
+
+def hybrid_enabled():
+    """MT_COMIC_OCR=auto（默认，装了 manga-ocr 就用）/ manga / rapid"""
+    import mt_config
+    mode = mt_config.load_env().get("MT_COMIC_OCR", "auto").strip().lower()
+    if mode == "rapid":
+        return False
+    if mode == "manga":
+        return True
+    return mocr_available()
+
+def enhance_with_mocr(clusters, target):
+    """对每个气泡级簇：裁片 → manga-ocr 整体重识别（竖排可靠）。
+    target = 页路径或图片 bytes。识别为空则保留 rapidocr 行文本。"""
+    from PIL import Image
+    if isinstance(target, bytes):
+        img = Image.open(io.BytesIO(target)).convert("RGB")
+    else:
+        img = Image.open(target).convert("RGB")
+    mocr = get_mocr()
+    ex = 8
+    for r in clusters:
+        x1, y1, x2, y2 = r["box"]
+        crop = img.crop((max(0, x1 - ex), max(0, y1 - ex),
+                         min(img.width, x2 + ex), min(img.height, y2 + ex)))
+        try:
+            t = str(mocr(crop)).strip()
+        except Exception:
+            t = ""
+        if t and has_word(t):
+            r["text"] = t
+    return clusters
+
 def ocr_regions(target):
     """对一张页做 OCR。target = 文件路径或图片 bytes。
     返回 [{"box":[x1,y1,x2,y2], "text": str}]，过滤低分/过小/无字条目。"""
@@ -79,6 +128,67 @@ _WORD_RE = re.compile(r"[0-9A-Za-z\u00c0-\u024f\u0370-\u03ff\u0400-\u04ff\u3040-
 
 def has_word(t):
     return bool(_WORD_RE.search(t))
+
+# ---------------- 气泡级聚类 ----------------
+# OCR 返回的是行级框：竖排日漫的每一列都是一根独立的窄长条。
+# 直接逐条回写会把气泡切成条纹、译文塞进单列。实证标定（真实漫画 sidecar）：
+# 同气泡相邻列的水平间隙中位 ≈8px、跨气泡 ≈30px、列宽中位 ≈50px——据此合并。
+
+def _mergeable(a, b):
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    xgap = max(0, max(ax1, bx1) - min(ax2, bx2))
+    ygap = max(0, max(ay1, by1) - min(ay2, by2))
+    if xgap and ygap:
+        return False                                  # 对角分离：不同气泡
+    if not xgap and not ygap:
+        return True                                   # 实体重叠（嵌套/误检）
+    if ygap == 0:                                     # 左右相邻 → 竖排的列
+        yo = min(ay2, by2) - max(ay1, by1)
+        minh = min(ay2 - ay1, by2 - by1)
+        minw = min(ax2 - ax1, bx2 - bx1)
+        return xgap <= max(20, minw * 0.5) and yo >= 0.4 * minh
+    # 上下相邻 → 横排的行；只有"行高"级别的框才允许跨行合并（防把上下两只气泡并掉）
+    xo = min(ax2, bx2) - max(ax1, bx1)
+    minh = min(ay2 - ay1, by2 - by1)
+    minw = min(ax2 - ax1, bx2 - bx1)
+    return ygap <= max(10, minh * 0.5) and minh <= 90 and xo >= 0.3 * minw
+
+def cluster_regions(regions):
+    """行级区域 → 气泡级区域（连通合并）。竖排簇文本按列右→左拼接（日文阅读序），
+    横排簇按行拼接（行间以 \n）。"""
+    if not regions:
+        return []
+    n = len(regions)
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _mergeable(regions[i]["box"], regions[j]["box"]):
+                parent[find(i)] = find(j)
+    groups = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    out = []
+    for idxs in groups.values():
+        rs = [regions[i] for i in idxs]
+        box = [min(r["box"][0] for r in rs), min(r["box"][1] for r in rs),
+               max(r["box"][2] for r in rs), max(r["box"][3] for r in rs)]
+        if box[3] - box[1] >= box[2] - box[0]:
+            ordered = sorted(rs, key=lambda r: (-r["box"][0], r["box"][1]))
+            text = "".join(r["text"] for r in ordered)
+        else:
+            ordered = sorted(rs, key=lambda r: (r["box"][1], r["box"][0]))
+            text = "\n".join(r["text"] for r in ordered)
+        out.append({"box": box, "text": text})
+    out.sort(key=lambda r: (r["box"][1], r["box"][0]))
+    return out
 
 # ---------------- 渲染（Pillow，仅回写端需要） ----------------
 _FONT_CACHE = {}
@@ -135,7 +245,7 @@ def close_zips():
     _ZIPS.clear()
 
 def page_bytes(pg, img):
-    """渲染后的页 → bytes（沿用原始格式，未知格式退 PNG）。"""
+    """渲染后的页 → bytes（沿用原始格式；JPEG 用高质量 92，防整页画质劣化）。"""
     buf = io.BytesIO()
     fmt = (pg.get("fmt") or "PNG").upper()
     if fmt == "JPG":
@@ -143,7 +253,7 @@ def page_bytes(pg, img):
     if fmt not in ("JPEG", "PNG", "WEBP", "BMP"):
         fmt = "PNG"
     try:
-        img.save(buf, fmt)
+        img.save(buf, fmt, quality=92)
     except Exception:
         buf = io.BytesIO()
         img.save(buf, "PNG")
@@ -176,30 +286,32 @@ def border_color(img, box):
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]")
 
 def _h_layout(draw, text, font, maxw):
-    """横排自动换行（拉丁按词、CJK 逐字）。返回行列表。"""
-    lines, cur, curw = [], "", 0
-    for tok in re.findall(r"\s+|\S+", text):
-        tw = draw.textlength(tok, font=font)
-        if cur and curw + tw > maxw and tok.strip():
-            lines.append(cur.rstrip())
-            cur, curw = (tok if tok.strip() else ""), tw
-        else:
-            cur += tok
-            curw += tw
-        while curw > maxw and len(cur) > 1:      # 超长词硬拆
-            lo, hi = 1, len(cur)
-            while lo < hi:
-                mid = (lo + hi) // 2
-                if draw.textlength(cur[:mid], font=font) <= maxw:
-                    lo = mid + 1
-                else:
-                    hi = mid
-            cut = max(1, lo - 1)
-            lines.append(cur[:cut])
-            cur, curw = cur[cut:], draw.textlength(cur[cut:], font=font)
-    if cur.strip() or not lines:
-        lines.append(cur.rstrip() or " ")
-    return lines
+    """横排自动换行（拉丁按词、CJK 逐字，支持 \n 分段）。返回行列表。"""
+    lines = []
+    for para in text.split("\n"):
+        cur, curw = "", 0
+        for tok in re.findall(r"\s+|\S+", para):
+            tw = draw.textlength(tok, font=font)
+            if cur and curw + tw > maxw and tok.strip():
+                lines.append(cur.rstrip())
+                cur, curw = (tok if tok.strip() else ""), tw
+            else:
+                cur += tok
+                curw += tw
+            while curw > maxw and len(cur) > 1:      # 超长词硬拆
+                lo, hi = 1, len(cur)
+                while lo < hi:
+                    mid = (lo + hi) // 2
+                    if draw.textlength(cur[:mid], font=font) <= maxw:
+                        lo = mid + 1
+                    else:
+                        hi = mid
+                cut = max(1, lo - 1)
+                lines.append(cur[:cut])
+                cur, curw = cur[cut:], draw.textlength(cur[cut:], font=font)
+        if cur.strip() or not lines:
+            lines.append(cur.rstrip() or " ")
+    return lines or [" "]
 
 def _draw_h(draw, box, text, font, size, color):
     x1, y1, x2, y2 = box
@@ -208,10 +320,12 @@ def _draw_h(draw, box, text, font, size, color):
     lines = _h_layout(draw, text, font, w - pad * 2)
     lh = size + max(2, size // 4)
     th = lh * len(lines)
+    sw = max(1, size // 12)
     y = y1 + max(pad, (h - th) // 2)
     for ln in lines:
         lw = draw.textlength(ln, font=font)
-        draw.text((x1 + max(pad, (w - lw) // 2), y), ln, font=font, fill=color)
+        draw.text((x1 + max(pad, (w - lw) // 2), y), ln, font=font, fill=color,
+                  stroke_width=sw, stroke_fill=color)
         y += lh
 
 def _draw_v(draw, box, text, font, size, color):
@@ -219,12 +333,13 @@ def _draw_v(draw, box, text, font, size, color):
     x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
     pad = max(2, size // 6)
-    chars = list(text.replace(" ", ""))
+    chars = list(text.replace(" ", "").replace("\n", ""))
     ch = size + max(2, size // 5)      # 每字行高
     colw = size + max(3, size // 3)    # 列宽
     per = max(1, int((h - pad * 2) // ch))
     ncols = (len(chars) + per - 1) // per
     tw = colw * ncols
+    sw = max(1, size // 12)
     x = x2 - pad - colw - max(0, (w - tw) // 2)
     for j in range(ncols):
         col = chars[j * per:(j + 1) * per]
@@ -232,7 +347,7 @@ def _draw_v(draw, box, text, font, size, color):
         for c in col:
             cw = draw.textlength(c, font=font)
             draw.text((x + (colw - size) // 2 + (size - cw) // 2, y), c,
-                      font=font, fill=color)
+                      font=font, fill=color, stroke_width=sw, stroke_fill=color)
             y += ch
         x -= colw
 
@@ -251,12 +366,19 @@ def _h_fits(draw, box, text, font, size):
     return lh * len(lines) <= (y2 - y1) - pad * 2
 
 def draw_region(draw, img, box, text, tl):
-    """填充框底色并排版绘制文本。竖长框 + 中日文 → 竖排。"""
+    """填充框底色并排版绘制文本。竖长框 + 中日文 → 竖排。
+    填充用圆角矩形并向外扩 3px 盖住原字边缘残墨。"""
     fill = border_color(img, box)
-    draw.rectangle(box, fill=fill)
+    x1, y1, x2, y2 = box
+    ex = 3
+    rad = max(4, min(x2 - x1, y2 - y1) // 10)
+    try:
+        draw.rounded_rectangle([x1 - ex, y1 - ex, x2 + ex, y2 + ex],
+                               radius=rad, fill=fill)
+    except AttributeError:                       # 旧版 Pillow 无圆角
+        draw.rectangle([x1 - ex, y1 - ex, x2 + ex, y2 + ex], fill=fill)
     lum = 0.299 * fill[0] + 0.587 * fill[1] + 0.114 * fill[2]
     color = (0, 0, 0) if lum > 128 else (255, 255, 255)
-    x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
     vertical = (tl in ("zh", "ja") and h >= w * 1.3 and _CJK_RE.search(text))
     start = max(9, min(72, int(min(w, h) * 0.85)))

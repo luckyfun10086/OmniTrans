@@ -29,13 +29,21 @@ def page_target(pg):
     return pg["ref"]
 
 def extract(path):
-    """逐页 OCR → (扁平字典, sidecar pages)。"""
+    """逐页 OCR → 气泡级聚类 → (扁平字典, sidecar pages)。"""
     pages = lib.collect_pages(path)
     out, side_pages = {}, []
     for i, pg in enumerate(pages, 1):
         try:
-            regions = [r for r in lib.ocr_regions(page_target(pg))
-                       if lib.has_word(r["text"])]
+            target = page_target(pg)
+            lines = [r for r in lib.ocr_regions(target)
+                     if lib.has_word(r["text"])]
+            regions = lib.cluster_regions(lines)    # 行级 → 气泡级（合并竖排列）
+            if regions and lib.hybrid_enabled():
+                try:
+                    regions = lib.enhance_with_mocr(regions, target)
+                except ImportError:
+                    print("  ! manga-ocr 未安装，回退 rapidocr 识别文本")
+                regions = [r for r in regions if lib.has_word(r["text"])]
         except ImportError:
             raise SystemExit("缺少 rapidocr-onnxruntime：请 pip install "
                              "rapidocr-onnxruntime（GUI 拖入漫画时会弹窗自动安装）")

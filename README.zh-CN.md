@@ -314,17 +314,19 @@ python engines/subtitle_apply.py <目录> <名>_extracted_translated.json   # ep
 
 ### 漫画（图片文件夹 / CBZ）
 
-拖入页图文件夹或 `.cbz` 即识别为「Comics」引擎。逐页本地 OCR
-（[rapidocr-onnxruntime](https://github.com/RapidAI/RapidOCR)）得到文本区域，
-重复台词去重；翻译后 `comic_apply.py` 嵌字回写：区域用边缘取样底色填充
-（气泡≈白），译文按框自动收缩字号绘制——竖长框且目标语言为中日文时自动竖排
-（列从右到左）。纯符号区域（♪ 等）不送翻也不改动。输出非破坏性：文件夹 →
-同级 `原名.zh/`，档案 → 同级 `原名.zh.cbz`。
+拖入页图文件夹或 `.cbz` 即识别为「Comics」引擎。OCR 行级框先**聚成气泡级区域**
+（相邻竖列合并——按真实漫画标定的阈值：同气泡列间隙 ≈8px、跨气泡 ≈30px），
+每只气泡一条完整句词条，而不是碎列；翻译后 `comic_apply.py` 嵌字回写：
+圆角矩形按边缘取样底色填充（气泡≈白），译文自动收缩字号绘制——竖长气泡且
+目标语言为中日文时自动竖排（列从右到左）。纯符号区域（♪ 等）不送翻也不改动。
+输出非破坏性：文件夹 → 同级 `原名.zh/`，档案 → 同级 `原名.zh.cbz`。
 
 - 依赖：`pip install rapidocr-onnxruntime Pillow`（GUI 首次使用弹窗自动安装）；
   字体自动取系统 CJK 字体，`.env` 里 `MT_FONT` 可指定
-- 已知边界：OCR 通用模型对横排文本最强，日漫竖排原文识别有限
-  （译文竖排渲染不受影响）；该场景的高质量路线（manga-ocr 桥接）在计划内
+- **日漫（竖排）**：装 [manga-ocr](https://github.com/kha-white/manga-ocr)
+  （`pip install manga-ocr`，含 PyTorch 约 700MB + 模型约 440MB）——检测仍用
+  RapidOCR，每只气泡裁片交给漫画专用模型重新识别，乱码碎片变成完整句子。
+  装好即自动启用（`MT_COMIC_OCR=auto`；可强制 `manga` / `rapid`）
 
 ### SRPG Studio 游戏专用流程
 

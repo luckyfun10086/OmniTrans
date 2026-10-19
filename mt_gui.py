@@ -1782,6 +1782,20 @@ class App:
                     f"  pip install {name}")
                 return False
             self.log(f"[comic] {name} 安装成功 ✓")
+        # 可选增强：日漫（竖排）识别专用模型
+        if not mt_config.check_mangaocr():
+            if messagebox.askyesno(
+                    "manga-ocr — 日漫识别增强 / JA manga OCR",
+                    "检测到日文漫画时，manga-ocr（漫画专用识别，竖排可靠）效果远好于默认 OCR。\n"
+                    "manga-ocr greatly improves Japanese-manga (vertical text) recognition.\n\n"
+                    "是否安装？（含 PyTorch 约 700MB，首次识别再下载模型约 440MB。\n"
+                    "跳过也能翻译，但竖排日文识别质量有限）\n"
+                    "Install? (PyTorch ~700MB + model ~440MB; skip = limited JA quality)"):
+                self.log("[comic] 正在安装 manga-ocr…（较大，可能需要几分钟）")
+                self.stage_var.set("Installing manga-ocr…")
+                self.root.update()
+                ok, msg = mt_config.install_mangaocr()
+                self.log(f"[comic] manga-ocr 安装{'成功 ✓' if ok else '失败: ' + msg}")
         return True
 
     def _resolve_script(self, script):

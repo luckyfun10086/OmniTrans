@@ -21,7 +21,8 @@ DEFAULT_ENDPOINT = ("https://clients5.google.com/translate_a/t"
 
 ENV_KEYS = ("MT_ENDPOINT", "MT_API_KEY", "MT_API_HEADER", "MT_SL", "MT_TL",
             "MT_AUTO_NAMES", "MT_LANG", "MT_API_TYPE", "MT_MODEL", "MT_FALLBACK",
-            "MT_THEME", "MT_BG", "MT_CONTEXT", "MT_ASR_MODEL", "MT_FONT")
+            "MT_THEME", "MT_BG", "MT_CONTEXT", "MT_ASR_MODEL", "MT_FONT",
+            "MT_COMIC_OCR")
 
 class ApiError(Exception):
     """kind: 'fatal' 立即终止（401/402/404 等，重试无意义）
@@ -540,6 +541,15 @@ def check_rapidocr():
 def install_rapidocr():
     """pip install rapidocr-onnxruntime。返回 (成功, 信息)。"""
     return pip_install("rapidocr-onnxruntime")
+
+def check_mangaocr():
+    """检测 manga-ocr（日漫专用识别增强）是否已安装。"""
+    import importlib.util
+    return importlib.util.find_spec("manga_ocr") is not None
+
+def install_mangaocr():
+    """pip install manga-ocr（含 torch，较大）。返回 (成功, 信息)。"""
+    return pip_install("manga-ocr")
 
 def check_pillow():
     """检测 Pillow 是否可用（背景图功能用，GUI 可选依赖）。"""

@@ -371,23 +371,25 @@ same-name `.srt` are reused as-is. Progress streams live into the GUI log.
 ### Comics (image folders / CBZ)
 
 Drop a folder of page images or a `.cbz` — recognized as the *Comics*
-engine. Pages are OCR'd locally with
-[rapidocr-onnxruntime](https://github.com/RapidAI/RapidOCR) into text
-regions; repeated lines dedup into one translation. After translation,
-`comic_apply.py` lettering-renders each region: the box is filled with a
-color sampled from its border (bubbles ≈ white), then the translation is
-auto-sized and drawn — tall boxes with zh/ja text render vertically
-(columns right-to-left). Symbol-only regions (♪ etc.) are neither
-translated nor touched. Output is non-destructive: a sibling `name.zh/`
-folder, or `name.zh.cbz` for archives.
+engine. OCR line boxes are clustered into **bubble-level regions** (adjacent
+vertical columns merge, calibrated on real manga: same-bubble gaps ≈8px vs
+cross-bubble ≈30px), so each bubble becomes one full-sentence entry instead
+of fragmented columns. After translation, `comic_apply.py` lettering-renders
+each bubble: a rounded rectangle filled with the border-sampled color
+(bubbles ≈ white), then the auto-sized translation — tall bubbles with zh/ja
+text render vertically (columns right-to-left). Symbol-only regions (♪ etc.)
+are neither translated nor touched. Output is non-destructive: a sibling
+`name.zh/` folder, or `name.zh.cbz` for archives.
 
 - Dependencies: `pip install rapidocr-onnxruntime Pillow` (GUI prompts on
   first use); the font is picked from system CJK fonts, override via
   `MT_FONT` in `.env`
-- Known limit: the OCR model is strongest at horizontal text; heavily
-  vertical Japanese manga is only partially recognized at the source stage
-  (translation rendering is unaffected). A manga-ocr bridge is on the
-  roadmap for that case.
+- **Japanese manga (vertical text)**: install [manga-ocr](https://github.com/kha-white/manga-ocr)
+  (`pip install manga-ocr`, bundles PyTorch ~700MB + a ~440MB model) —
+  detection stays with RapidOCR, but each bubble crop is re-recognized by
+  the manga-specialized model, turning garbled fragments into clean
+  sentences. Enabled automatically when installed (`MT_COMIC_OCR=auto`;
+  force with `manga` / `rapid`)
 
 ### SRPG Studio games
 
