@@ -285,6 +285,28 @@ def border_color(img, box):
 
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]")
 
+# ---------------- 文本清洗 ----------------
+# manga-ocr 的日文标点（．．．『』「」）会原样进词条，机翻又会保留到译文，
+# 嵌出来的字前后就挂着符号。源文本入词典前归一省略号（顺带让
+# 'では．．'/'では．．．' 去重成同一条）；译文绘制前剥掉两端装饰符号。
+
+_ELLI_RUN = re.compile(r"[．。]{2,}|\.{3,}")
+# 两端可剥的装饰：角引号/省略号/句读（成对循环剥，保留 ？！～♡ 等语气符）
+_EDGE_STRIP = "「」『』【】《》〈〉〔〕[]\"'“”‘’…．。，、,.、"
+
+def clean_source(t):
+    """OCR 文本入词典前：省略号归一为 ……，去首尾空白。"""
+    t = _ELLI_RUN.sub("……", t.strip())
+    return t.replace("...", "……").strip()
+
+def clean_target(t):
+    """译文/原文绘制前：剥掉两端的引号、省略号、句读装饰。"""
+    t = _ELLI_RUN.sub("……", t)
+    t = t.replace("...", "……")
+    for _ in range(3):
+        t = t.strip().strip(_EDGE_STRIP)
+    return t.strip()
+
 def _h_layout(draw, text, font, maxw):
     """横排自动换行（拉丁按词、CJK 逐字，支持 \n 分段）。返回行列表。"""
     lines = []
@@ -313,12 +335,26 @@ def _h_layout(draw, text, font, maxw):
             lines.append(cur.rstrip() or " ")
     return lines or [" "]
 
+# ---------------- 排版度量（fits 与 draw 必须共用，否则溢出） ----------------
+# 紧凑密度：行高/列宽 ≈ 1.1×字号（漫画嵌字常规），同框能排出更大的字
+def _pad(size):
+    return max(2, size // 8)
+
+def _hlh(size):            # 横排行高
+    return size + max(2, size // 8)
+
+def _vch(size):            # 竖排每字行高
+    return size + max(2, size // 10)
+
+def _vcolw(size):          # 竖排列宽
+    return size + max(2, size // 8)
+
 def _draw_h(draw, box, text, font, size, color):
     x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
-    pad = max(2, size // 6)
+    pad = _pad(size)
     lines = _h_layout(draw, text, font, w - pad * 2)
-    lh = size + max(2, size // 4)
+    lh = _hlh(size)
     th = lh * len(lines)
     sw = max(1, size // 12)
     y = y1 + max(pad, (h - th) // 2)
@@ -332,10 +368,10 @@ def _draw_v(draw, box, text, font, size, color):
     """竖排：列自右向左，每列自上而下。"""
     x1, y1, x2, y2 = box
     w, h = x2 - x1, y2 - y1
-    pad = max(2, size // 6)
+    pad = _pad(size)
     chars = list(text.replace(" ", "").replace("\n", ""))
-    ch = size + max(2, size // 5)      # 每字行高
-    colw = size + max(3, size // 3)    # 列宽
+    ch = _vch(size)
+    colw = _vcolw(size)
     per = max(1, int((h - pad * 2) // ch))
     ncols = (len(chars) + per - 1) // per
     tw = colw * ncols
@@ -353,17 +389,16 @@ def _draw_v(draw, box, text, font, size, color):
 
 def _v_fits(draw, box, text, font, size):
     x1, y1, x2, y2 = box
-    pad = max(2, size // 6)
-    per = max(1, int((y2 - y1 - pad * 2) // (size + max(2, size // 5))))
-    ncols = (len(text.replace(" ", "")) + per - 1) // per
-    return ncols * (size + max(3, size // 3)) <= (x2 - x1) - pad * 2
+    pad = _pad(size)
+    per = max(1, int((y2 - y1 - pad * 2) // _vch(size)))
+    ncols = (len(text.replace(" ", "").replace("\n", "")) + per - 1) // per
+    return ncols * _vcolw(size) <= (x2 - x1) - pad * 2
 
 def _h_fits(draw, box, text, font, size):
     x1, y1, x2, y2 = box
-    pad = max(2, size // 6)
+    pad = _pad(size)
     lines = _h_layout(draw, text, font, (x2 - x1) - pad * 2)
-    lh = size + max(2, size // 4)
-    return lh * len(lines) <= (y2 - y1) - pad * 2
+    return _hlh(size) * len(lines) <= (y2 - y1) - pad * 2
 
 def draw_region(draw, img, box, text, tl):
     """填充框底色并排版绘制文本。竖长框 + 中日文 → 竖排。
@@ -381,7 +416,7 @@ def draw_region(draw, img, box, text, tl):
     color = (0, 0, 0) if lum > 128 else (255, 255, 255)
     w, h = x2 - x1, y2 - y1
     vertical = (tl in ("zh", "ja") and h >= w * 1.3 and _CJK_RE.search(text))
-    start = max(9, min(72, int(min(w, h) * 0.85)))
+    start = max(9, min(96, int(min(w, h) * 0.85)))
     for size in range(start, 7, -1):
         font = find_font(size)
         if font is None:

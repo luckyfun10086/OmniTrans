@@ -43,7 +43,9 @@ def extract(path):
                     regions = lib.enhance_with_mocr(regions, target)
                 except ImportError:
                     print("  ! manga-ocr 未安装，回退 rapidocr 识别文本")
-                regions = [r for r in regions if lib.has_word(r["text"])]
+            for r in regions:
+                r["text"] = lib.clean_source(r["text"])   # 省略号归一（也提升去重）
+            regions = [r for r in regions if lib.has_word(r["text"])]
         except ImportError:
             raise SystemExit("缺少 rapidocr-onnxruntime：请 pip install "
                              "rapidocr-onnxruntime（GUI 拖入漫画时会弹窗自动安装）")

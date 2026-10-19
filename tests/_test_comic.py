@@ -87,6 +87,33 @@ stacked_bubbles = cl.cluster_regions([{"box": [100, 50, 300, 400], "text": "上"
 assert len(stacked_bubbles) == 2, "上下两只气泡不能被并成一只"
 print("聚类规则 ✓  同气泡竖列合并（右→左拼接）/ 分离气泡不合并 / 上下气泡不合并")
 
+# ---------- 单元：文本清洗 ----------
+assert cl.clean_source("では．．．") == "では……"
+assert cl.clean_source("前．．。後") == "前……後"
+assert cl.clean_target("「你好……。」") == "你好"
+assert cl.clean_target("……开始") == "开始"
+assert cl.clean_target("真的吗？！") == "真的吗？！"
+assert cl.clean_target("『最高』……") == "最高"
+print("文本清洗 ✓  省略号归一 / 两端引号句读剥除，语气符 ？！ 保留")
+
+# ---------- 单元：竖排渲染不越框 ----------
+img = Image.new("RGB", (600, 600), (255, 255, 255))
+d = ImageDraw.Draw(img)
+box = (100, 50, 180, 550)      # 窄高框
+assert cl.draw_region(d, img, box, "这是一句用来测试排版边界的中文译文", "zh")
+px = img.load()
+ins_cnt = out_cnt = 0
+for x in range(0, 600, 2):
+    for y in range(0, 600, 2):
+        if max(px[x, y]) >= 128:
+            continue
+        if 100 - 6 <= x <= 180 + 6 and 50 - 6 <= y <= 550 + 6:
+            ins_cnt += 1
+        else:
+            out_cnt += 1
+assert out_cnt == 0 and ins_cnt > 20, (ins_cnt, out_cnt)
+print("排版边界 ✓  竖排文字全部落在气泡框内（±6px 描边余量）")
+
 # ---------- ② 文件夹流：提取（聚类后） ----------
 comic = os.path.join(tmp, "MyComic")
 os.makedirs(comic)

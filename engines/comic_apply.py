@@ -62,6 +62,14 @@ def main():
         v = tr.get(tr_key, "")
         return v.strip() if isinstance(v, str) else ""
 
+    def render_text(r):
+        """译文优先，绘制前清洗两端装饰符号；洗成空串则保持原样不嵌。"""
+        zh = pick(r["text"])
+        txt = lib.clean_target(zh) if zh else ""
+        if not txt:
+            txt = lib.clean_target(r["text"])
+        return txt, bool(zh)
+
     nreg = napplied = 0
     if src["src"].lower().endswith((".cbz", ".zip")):
         out_path = os.path.splitext(src["src"])[0] + f".{tl}.cbz"
@@ -71,10 +79,10 @@ def main():
                 d = ImageDraw.Draw(img)
                 for r in pg["regions"]:
                     nreg += 1
-                    txt = pick(r["text"]) or r["text"]
-                    lib.draw_region(d, img, r["box"], txt, tl)
-                    if pick(r["text"]):
-                        napplied += 1
+                    txt, zh = render_text(r)
+                    if txt:
+                        lib.draw_region(d, img, r["box"], txt, tl)
+                        napplied += bool(zh)
                 data, _ = lib.page_bytes(pg, img)
                 zout.writestr(pg["ref"], data)
     else:
@@ -85,10 +93,10 @@ def main():
             d = ImageDraw.Draw(img)
             for r in pg["regions"]:
                 nreg += 1
-                txt = pick(r["text"]) or r["text"]
-                lib.draw_region(d, img, r["box"], txt, tl)
-                if pick(r["text"]):
-                    napplied += 1
+                txt, zh = render_text(r)
+                if txt:
+                    lib.draw_region(d, img, r["box"], txt, tl)
+                    napplied += bool(zh)
             rel = os.path.relpath(pg["ref"], src["src"])
             data, ext = lib.page_bytes(pg, img)
             dstf = os.path.join(out_path, rel)
