@@ -168,7 +168,7 @@ Bob               不写 = 号则保持英文原样
 
 | 引擎 | 数据位置 | 支持状态 |
 |------|----------|----------|
-| **Wolf RPG Editor**（ウディタ） | `Data.wolf` / `Data/` | ✅ 支持——桥接 UberWolf+WolfTL（MIT，自动下载）；Wolf 3.x 可完整回写中文，2.x 为 CP932 存储（中文会丢，走 MTool 导出路径） |
+| **Wolf RPG Editor**（ウディタ） | `Data.wolf` / `Data/` | ✅ 支持——桥接 UberWolf+WolfTL（MIT，自动下载）；Wolf 3.x 可完整回写中文；2.x（CP932 存储）自动用简体→JIS 字形映射重写（可读汉字体中文，无法映射的字逐个报告） |
 | **AliceSoft**（.ain） | 游戏根目录 `*.ain` | ✅ 支持——桥接 [alice-tools](https://github.com/nunuhara/alice-tools)（GPL-2.0 命令行，首次运行自动下载、独立进程调用）；自动解密 AI2 加密、回写时保持加密头；中文经 CP932 存储，简体特有字形自动映射为 JIS 兼容字形（可读的汉字体中文），无对应者替换 `？` 并逐字报告 |
 | RPG Maker **MZ** | `data/` | ✅ 完整支持 |
 | RPG Maker **MV** | `www/data/`（部分发行版在 `data/`） | ✅ 完整支持 |

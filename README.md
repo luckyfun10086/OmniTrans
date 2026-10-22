@@ -198,7 +198,7 @@ work in every mode.
 
 | Engine | Data location | Status |
 |--------|---------------|--------|
-| **Wolf RPG Editor** (ウディタ) | `Data.wolf` / `Data/` | ✅ supported — bridges UberWolf+WolfTL (MIT, auto-downloaded); Wolf 3.x fully writable, 2.x is CP932 (Chinese dropped → use the MTool export path) |
+| **Wolf RPG Editor** (ウディタ) | `Data.wolf` / `Data/` | ✅ supported — bridges UberWolf+WolfTL (MIT, auto-downloaded); Wolf 3.x fully writable; 2.x (CP932) auto-rewrites via the simplified→JIS-glyph mapping (readable kanji-form Chinese, unmappable chars reported) |
 | **AliceSoft** (.ain) | `*.ain` in the game root | ✅ supported — bridges [alice-tools](https://github.com/nunuhara/alice-tools) (GPL-2.0 CLI, auto-downloaded, kept as a separate process); decrypts AI2-encrypted AIN, writes back with the encryption preserved; Chinese is stored via CP932 with an automatic simplified→JIS-glyph mapping (readable kanji-form Chinese; unmappable chars become `？` and are reported) |
 | RPG Maker **MZ** | `data/` | ✅ fully supported |
 | RPG Maker **MV** | `www/data/` (or `data/` in some distributions) | ✅ fully supported |

@@ -14,7 +14,7 @@ RPG Maker VX Ace / VX / XP 独立回写器（无需 MTool）
 用法：
     python rva_apply.py <游戏目录> <译文json>
 """
-import json, sys, io, os, glob, shutil
+import json, sys, io, os, glob, shutil, re, zlib
 
 _ENG = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_ENG))    # 项目根：mt_config 等
@@ -152,6 +152,63 @@ def apply_file(path, tr, stats):
     return True, R.dumps(root)
 
 
+_FONT_ASGN = re.compile(rb"Font\.default_name\s*=\s*(\[?[^\r\n]{0,120})")
+_FONT_STR = re.compile(rb'"([^"\x00-\x1f]{1,64})"')
+# 常见日文字体（缺简体字形 → 游戏内显示口口方块）
+_JP_ONLY = {"VL Gothic", "VL PGothic", "MS Gothic", "ＭＳ ゴシック", "MS Mincho",
+            "ＭＳ 明朝", "MS PMincho", "Meiryo", "メイリオ", "Yu Gothic",
+            "游ゴシック", " Hiragino Kaku Gothic", "Hiragino Sans", "UmePlus Gothic"}
+
+
+def scan_fonts(data_dir):
+    """从 Scripts 数据解出 Font.default_name 的字体名（只读，供缺字提醒）。"""
+    fonts = set()
+    for fn in ("Scripts.rgss3a", "Scripts.rvdata", "Scripts.rxdata"):
+        p = os.path.join(data_dir, fn)
+        if not os.path.isfile(p):
+            continue
+        try:
+            arr = R.loads(open(p, "rb").read())
+        except Exception:
+            continue
+        entries = getattr(arr, "items", None)
+        if entries is None:
+            continue
+        for item in entries[1:]:            # entries[0] = magic number
+            cells = getattr(item, "items", None)
+            if not (isinstance(cells, list) and len(cells) >= 3):
+                continue
+            raw = getattr(cells[2], "data", None)
+            if raw is None:
+                continue
+            try:
+                code = zlib.decompress(raw)
+            except Exception:
+                continue
+            for m in _FONT_ASGN.finditer(code):
+                for nm in _FONT_STR.findall(m.group(1)):
+                    try:
+                        fonts.add(nm.decode("utf-8"))
+                    except UnicodeDecodeError:
+                        pass
+    return fonts
+
+
+def warn_fonts(data_dir):
+    """中日字体缺字提醒（VX Ace/VX/XP 汉化后显示口口的常见原因）。"""
+    try:
+        fonts = scan_fonts(data_dir)
+    except Exception:
+        return
+    risky = sorted(f for f in fonts if f.strip() in _JP_ONLY)
+    if not risky:
+        return
+    print(f"ℹ 字体提示：脚本默认字体为 {'、'.join(risky)} —— 若进游戏看到口口方块，"
+          f"是日文字体缺简体字形。")
+    print("  处理：把脚本中 Font.default_name 改为中文字体（SimSun / 微软雅黑 / SimHei），"
+          "或用 MTool 的字体补丁。")
+
+
 def main():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     game = sys.argv[1]
@@ -186,6 +243,8 @@ def main():
     print(f"回写完成：{stats['applied']} 处已翻译，{stats['skip_lines']} 处行数不齐保持原文"
           + (f"，{stats['enc']} 处编码失败保持原文" if stats['enc'] else ""))
     print(f"改动文件 {n_written} 个；原文件备份到: {backup}")
+    if n_written:
+        warn_fonts(data_dir)
 
 
 if __name__ == "__main__":

@@ -195,6 +195,22 @@ check("改写后身份保持", tree2.items[0] is tree2.items[1].ivar("@parameter
 check("改写生效", tree2.items[0].decode() == "改写后"
       and tree2.items[1].ivar("@parameters").items[0].decode() == "改写后")
 
+# ---------- 字体扫描（rva_apply.warn_fonts 依赖项） ----------
+import zlib, tempfile, os as _os
+sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "engines"))
+from rva_apply import scan_fonts
+script = b'Font.default_name = "VL Gothic"\n'
+entry = R.MArray([R.MInt(100), R.MStr(b"main"), R.MStr(zlib.compress(script))])
+scripts_file = R.MArray([R.MInt(1), entry])
+td = tempfile.mkdtemp()
+open(_os.path.join(td, "Scripts.rgss3a"), "wb").write(R.dumps(scripts_file))
+check("字体扫描：识别 Font.default_name", scan_fonts(td) == {"VL Gothic"})
+open(_os.path.join(td, "Scripts.rgss3a"), "wb").write(
+    R.dumps(R.MArray([R.MInt(1), R.MArray([R.MInt(1), R.MStr(b"s"),
+                                           R.MStr(zlib.compress(b"Font.default_name = [\"MS Gothic\", \"SimSun\"]"))])])))
+check("字体扫描：数组形式多字体", scan_fonts(td) == {"MS Gothic", "SimSun"})
+
+
 print()
 if FAILS:
     print(f"✗ {len(FAILS)} 项失败: {FAILS}")
