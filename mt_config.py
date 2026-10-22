@@ -407,8 +407,10 @@ ENGINES = {
     # ---- 可识别、暂不支持（给出替代方案） ----
     "siglus":     {"name": "SiglusEngine (Key)", "supported": False, "detect": _det_siglus,
                    "reason": "私有加密格式（Scene.pck）。请使用 MTool 运行时翻译。"},
-    "alice":      {"name": "AliceSoft (.ain/.ex)", "supported": False, "detect": _det_alicesoft,
-                   "reason": "私有二进制格式（.ain 系统脚本）。可用 AIN 系工具（如 aindec）配合 MTool。"},
+    "alice":      {"name": "AliceSoft (.ain/.ex)", "supported": True,
+                   "extractor": "engines/ain_extract.py", "applier": "engines/ain_apply.py",
+                   "deps": [],
+                   "detect": _det_alicesoft},
     "exhibit":    {"name": "ExHIBIT 私有引擎", "supported": False, "detect": _det_exhibit,
                    "reason": "私有二进制格式（.rld/.rnf/.JP），无公开文档，静态提取不可行。请使用 MTool 运行时翻译。"},
     "wolf":       {"name": "Wolf RPG Editor (ウディタ)", "supported": True,

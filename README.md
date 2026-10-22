@@ -86,6 +86,7 @@ pyinstaller --onefile --windowed --name OmniTrans --collect-all tkinterdnd2
   --add-data "engines/tyrano_extract.py;engines/" --add-data "engines/tyrano_apply.py;engines/" 
   --add-data "engines/unity_extract.py;engines/" --add-data "engines/unity_apply.py;engines/"
   --add-data "engines/wolf_extract.py;engines/" --add-data "engines/wolf_apply.py;engines/"
+  --add-data "engines/ain_extract.py;engines/" --add-data "engines/ain_apply.py;engines/"
   --add-data "engines/subtitle_extract.py;engines/" --add-data "engines/subtitle_apply.py;engines/"
   --add-data "engines/subtitle_lib.py;engines/"
   --add-data "engines/media_extract.py;engines/"
@@ -198,6 +199,7 @@ work in every mode.
 | Engine | Data location | Status |
 |--------|---------------|--------|
 | **Wolf RPG Editor** (ウディタ) | `Data.wolf` / `Data/` | ✅ supported — bridges UberWolf+WolfTL (MIT, auto-downloaded); Wolf 3.x fully writable, 2.x is CP932 (Chinese dropped → use the MTool export path) |
+| **AliceSoft** (.ain) | `*.ain` in the game root | ✅ supported — bridges [alice-tools](https://github.com/nunuhara/alice-tools) (GPL-2.0 CLI, auto-downloaded, kept as a separate process); decrypts AI2-encrypted AIN, writes back with the encryption preserved; Chinese is stored via CP932 with an automatic simplified→JIS-glyph mapping (readable kanji-form Chinese; unmappable chars become `？` and are reported) |
 | RPG Maker **MZ** | `data/` | ✅ fully supported |
 | RPG Maker **MV** | `www/data/` (or `data/` in some distributions) | ✅ fully supported |
 | **RPG Maker VX Ace / VX / XP** | `Data/*.rvdata2` (VX: `.rvdata`, XP: `.rxdata`) | ✅ fully supported — pure-Python Ruby Marshal 4.8 codec, byte-exact round-trip |
@@ -210,7 +212,7 @@ work in every mode.
 | **Video / Audio** (no subtitles) | `.mp4` `.mkv` `.ts` … / `.mp3` `.m4a` … | ✅ supported — local Whisper transcription (faster-whisper) generates the `.srt`, then the subtitle flow takes over; existing same-name `.srt` files are reused, never re-transcribed |
 | **Comics** (image folders / `.cbz`) | folders of page images, `.cbz`/`.cbr`/`.cb7` | ✅ supported — local OCR ([rapidocr-onnxruntime](https://github.com/RapidAI/RapidOCR)) → translate → Pillow lettering (vertical text in tall boxes for zh/ja, auto font sizing); output to a sibling `name.zh/` folder or `name.zh.cbz`, originals untouched |
 
-Detected but not (yet) supported: SiglusEngine (Key), AliceSoft (.ain), ExHIBIT,
+Detected but not (yet) supported: SiglusEngine (Key), ExHIBIT,
 NScripter, EXSTIA — dropping such a folder tells you which engine it is and
 what to use instead.
 
@@ -334,6 +336,27 @@ CP932 and drops Simplified Chinese characters** (Japanese-compatible
 translations still apply). For 2.x Chinese localization use the MTool
 export path instead. Verified on the official 3.728 base system (full
 round-trip) and a real packed 2.x game (Misao, 548 strings).
+
+### AliceSoft (.ain) games
+
+AliceSoft titles store everything in an AI2-encrypted `.ain` script. The engine
+bridges [alice-tools](https://github.com/nunuhara/alice-tools) (GPL-2.0; the CLI is
+downloaded to `bin/alice/` on first run and invoked as a separate process, so it
+never enters this project's source):
+
+```
+python engines/ain_extract.py <game-folder>   # decrypt+dump → <game>_extracted.json
+python engines/ain_apply.py <game-folder> <game>_extracted_translated.json
+```
+
+- Non-destructive: the original `.ain` is backed up as `*.ain.automt.bak`;
+  the rebuilt file keeps the AI2 encryption header.
+- After applying, the dump is read back and every entry verified.
+- **CP932 storage limit**: simplified-Chinese-only glyphs cannot be stored, so
+  translations are auto-mapped to JIS-compatible glyphs (这→這、为→為、说→説、
+  你→君、她→伊…) — readable kanji-form Chinese; anything still unmappable becomes
+  `？` and the apply report counts every lost char. Full simplified display needs
+  a runtime hook (e.g. MTool) or a font patch.
 
 ### Subtitle files (.srt / .ass / .vtt)
 
@@ -459,7 +482,7 @@ stable margin (e.g. 19.1%→23.7% of MTool keys, 20.3%→25.2% of text-only
 keys) — MTool's runtime dictionary accumulates fragments/numbers/version
 drift that static extraction can't match. For engines OmniTrans writes
 back directly, the static ④ Apply is always 100%; the MTool path is most
-valuable for engines we detect but don't support (Siglus, AliceSoft,
+valuable for engines we detect but don't support (Siglus,
 ExHIBIT, Wolf, EXSTIA…): export untranslated text from MTool, translate
 it here, put the file back.
 

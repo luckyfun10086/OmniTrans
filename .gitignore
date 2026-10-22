@@ -50,3 +50,6 @@ library.json
 *_translated.json.bak
 *.bak2
 *.bak3
+ain_work/
+ain_test_tr.json
+*_ainwork.json

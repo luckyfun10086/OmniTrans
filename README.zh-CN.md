@@ -122,6 +122,7 @@ pyinstaller --onefile --windowed --name OmniTrans --collect-all tkinterdnd2
   --add-data "engines/tyrano_extract.py;engines/" --add-data "engines/tyrano_apply.py;engines/" 
   --add-data "engines/unity_extract.py;engines/" --add-data "engines/unity_apply.py;engines/"
   --add-data "engines/wolf_extract.py;engines/" --add-data "engines/wolf_apply.py;engines/"
+  --add-data "engines/ain_extract.py;engines/" --add-data "engines/ain_apply.py;engines/"
   --add-data "engines/subtitle_extract.py;engines/" --add-data "engines/subtitle_apply.py;engines/"
   --add-data "engines/subtitle_lib.py;engines/"
   --add-data "engines/media_extract.py;engines/"
@@ -168,6 +169,7 @@ Bob               不写 = 号则保持英文原样
 | 引擎 | 数据位置 | 支持状态 |
 |------|----------|----------|
 | **Wolf RPG Editor**（ウディタ） | `Data.wolf` / `Data/` | ✅ 支持——桥接 UberWolf+WolfTL（MIT，自动下载）；Wolf 3.x 可完整回写中文，2.x 为 CP932 存储（中文会丢，走 MTool 导出路径） |
+| **AliceSoft**（.ain） | 游戏根目录 `*.ain` | ✅ 支持——桥接 [alice-tools](https://github.com/nunuhara/alice-tools)（GPL-2.0 命令行，首次运行自动下载、独立进程调用）；自动解密 AI2 加密、回写时保持加密头；中文经 CP932 存储，简体特有字形自动映射为 JIS 兼容字形（可读的汉字体中文），无对应者替换 `？` 并逐字报告 |
 | RPG Maker **MZ** | `data/` | ✅ 完整支持 |
 | RPG Maker **MV** | `www/data/`（部分发行版在 `data/`） | ✅ 完整支持 |
 | **RPG Maker VX Ace / VX / XP** | `Data/*.rvdata2`（VX `.rvdata` / XP `.rxdata`） | ✅ 完整支持——纯 Python Ruby Marshal 4.8 编解码器，字节级还原 |
@@ -180,7 +182,7 @@ Bob               不写 = 号则保持英文原样
 | **音视频**（无字幕） | `.mp4` `.mkv` `.ts` 等 / `.mp3` `.m4a` 等 | ✅ 支持——本地 Whisper 听译（faster-whisper）先生成 `.srt` 再走字幕链路；已有同名 `.srt` 直接复用，绝不重复听译 |
 | **漫画**（图片文件夹 / `.cbz`） | 页图文件夹（含 `ch_001/` 子目录结构）、`.cbz`/`.cbr`/`.cb7` | ✅ 支持——本地 OCR（[rapidocr-onnxruntime](https://github.com/RapidAI/RapidOCR)）→ 机翻 → Pillow 嵌字（竖长框自动竖排、字号自适应）；输出到同级 `原名.zh/` 文件夹或 `原名.zh.cbz`，原文件不动 |
 
-可识别但暂不支持：SiglusEngine（Key 社）、AliceSoft（.ain）、ExHIBIT、
+可识别但暂不支持：SiglusEngine（Key 社）、ExHIBIT、
 NScripter、EXSTIA——拖入即提示引擎名称与替代方案。
 
 MV/MZ 的全部游戏文本都是明文 JSON（`Map*.json`、`CommonEvents.json`、
@@ -284,6 +286,23 @@ python engines/wolf_apply.py <游戏目录> <游戏名>_extracted_translated.jso
 （日文兼容译文仍可回写）。2.x 的中文汉化请改用 MTool 导出路径。
 已在官方 3.728 基本系统（全链路往返）与真实 2.x 封包游戏（Misao，548 条）上验证。
 
+### AliceSoft（.ain）游戏
+
+AliceSoft 社作品把全部剧本装在 AI2 加密的 `.ain` 里。引擎桥接
+[alice-tools](https://github.com/nunuhara/alice-tools)（GPL-2.0；命令行工具首次运行
+自动下载到 `bin/alice/`、独立进程调用，不进入本项目源码）：
+
+```
+python engines/ain_extract.py <游戏目录>   # 解密+导出 → <游戏名>_extracted.json
+python engines/ain_apply.py <游戏目录> <游戏名>_extracted_translated.json
+```
+
+- 非破坏：原 `.ain` 备份为 `*.ain.automt.bak`；重建文件保持 AI2 加密头
+- 回写后自动 dump 回读、逐条验证命中
+- **CP932 存储限制**：简体特有字形无法存储，译文自动映射为 JIS 兼容字形
+  （这→這、为→為、说→説、你→君、她→伊…）——可读的汉字体中文；仍无对应者
+  替换 `？` 并在回写报告逐字计数。完整简体显示需运行时方案（如 MTool）或字库补丁
+
 ### 字幕文件（.srt / .ass / .vtt）
 
 拖入视频目录（或单个字幕文件）即识别为「Subtitle」引擎。时间轴、VTT 头、
@@ -382,7 +401,7 @@ GUI 游戏页有 **📤 导出 MTool 用 json** 按钮做同样的事。对照�
 实测，变体把键覆盖率稳定拉高一截（如 MTool 键 19.1%→23.7%，纯文本键
 20.3%→25.2%）——MTool 的运行时字典累积了碎片/数字/版本漂移，静态提取无法
 全部对上。对 OmniTrans 支持静态回写的引擎，「④ 导入游戏」永远是 100%；
-MTool 路径的最大价值在于**我们只识别、不支持的引擎**（Siglus、AliceSoft、
+MTool 路径的最大价值在于**我们只识别、不支持的引擎**（Siglus、
 ExHIBIT、Wolf、EXSTIA…）：用 MTool 导出未翻译文本 → 这里翻 → 文件放回。
 
 ## 命令行三步流程（与 GUI 等价）
