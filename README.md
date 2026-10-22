@@ -89,6 +89,7 @@ pyinstaller --onefile --windowed --name OmniTrans --collect-all tkinterdnd2
   --add-data "engines/subtitle_extract.py;engines/" --add-data "engines/subtitle_apply.py;engines/"
   --add-data "engines/subtitle_lib.py;engines/"
   --add-data "engines/media_extract.py;engines/"
+  --add-data "engines/comic_extract.py;engines/" --add-data "engines/comic_apply.py;engines/" --add-data "engines/comic_lib.py;engines/"
   --add-data "engines/mtool_export.py;engines/" mt_gui.py
 ```
 
