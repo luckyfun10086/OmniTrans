@@ -160,7 +160,9 @@ def collect_py_strings(stmts):
     def rec(n, out, depth=0):
         if depth > 12:
             return
-        if type(n).__name__ == "S_renpy_astsupport_PyExpr":
+        # 桩名来自 find_class：module="renpy.ast.support" → "S_renpy_ast_support_PyExpr"
+        # （旧版还比对过 "S_renpy_astsupport_PyExpr"，两种写法都认，防旧数据漏收）
+        if type(n).__name__ in ("S_renpy_ast_support_PyExpr", "S_renpy_astsupport_PyExpr"):
             args = getattr(n, "_args", ())
             if args and isinstance(args[0], str):
                 for m in pat.finditer(args[0]):

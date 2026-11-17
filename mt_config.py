@@ -291,6 +291,12 @@ def translate_batch_openai(texts, sl, tl, endpoint, ctxs=None,
 def _has_ext(files, *exts):
     return any(f.lower().endswith(exts) for f in files)
 
+def _has_name(files, *names):
+    """精确文件名匹配（大小写不敏感）：Windows 文件系统不区分大小写，
+    真实游戏常见 Game.exe / GameExe.dat 等变体大小写。"""
+    lowered = {f.lower() for f in files}
+    return any(n.lower() in lowered for n in names)
+
 def _det_kirikiri(game_dir, files):
     # .xp3 封包（也可能藏在 exe 同级；data.xp3/patch*.xp3 最常见）
     return _has_ext(files, ".xp3")
@@ -311,8 +317,8 @@ def _det_mvmz(game_dir, files):
     return False
 
 def _det_srpg(game_dir, files):
-    return "data.dts" in files and ("runtime.rts" in files or "environment.evs" in files
-                                    or "game.exe" in files)
+    return _has_name(files, "data.dts") and (
+        _has_name(files, "runtime.rts", "environment.evs", "game.exe"))
 
 def _det_unity(game_dir, files):
     return any(f.endswith("_Data") and os.path.isdir(os.path.join(game_dir, f))
@@ -333,15 +339,15 @@ def _det_tyrano(game_dir, files):
     return any(f.lower() == "tyrano.js" for f in files)
 
 def _det_exhibit(game_dir, files):
-    return _has_ext(files, ".rld") or "ExHIBIT.ini" in files or "ExHIBIT.exe" in files
+    return _has_ext(files, ".rld") or _has_name(files, "ExHIBIT.ini", "ExHIBIT.exe")
 
 def _det_wolf(game_dir, files):
-    return _has_ext(files, ".wolf") or "wolf.dat" in files
+    return _has_ext(files, ".wolf") or _has_name(files, "wolf.dat")
 
 def _det_siglus(game_dir, files):
     # Key 社 SiglusEngine：Scene.pck / Gameexe.dat / SiglusEngine.exe
     # （不泛匹配 *.pck：Godot 也用 .pck，会误判）
-    return "Scene.pck" in files or "Gameexe.dat" in files or any(
+    return _has_name(files, "Scene.pck", "Gameexe.dat") or any(
         f.lower().startswith("siglusengine") for f in files)
 
 def _det_alicesoft(game_dir, files):
@@ -350,11 +356,11 @@ def _det_alicesoft(game_dir, files):
 
 def _det_nscripter(game_dir, files):
     # NScripter：nscript.dat / *.nsa
-    return "nscript.dat" in files or _has_ext(files, ".nsa")
+    return _has_name(files, "nscript.dat") or _has_ext(files, ".nsa")
 
 def _det_exstia(game_dir, files):
     # Liar-soft 系 EXSTIA：_CONFIG.MED / install.dat
-    return "_CONFIG.MED" in files or _has_ext(files, ".med")
+    return _has_name(files, "_CONFIG.MED") or _has_ext(files, ".med")
 
 def _det_subtitle(game_dir, files):
     # 字幕文件（.srt/.vtt/.ass/.ssa）：也看一层子目录（Season 01/ 结构）
