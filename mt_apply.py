@@ -23,6 +23,11 @@ import mt_config
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 src = sys.argv[1] if len(sys.argv) > 1 else "ManualTransFile.json"
+for need in (src, "mt_work/masked.json", "mt_work/tokens.json"):
+    if not os.path.exists(need):
+        print(f"[错误] 找不到 {need} —— 管线文件不全。先运行清洗（GUI 拖入 json 或 mt_clean.py）"
+              f"与翻译（mt_translate.py）")
+        sys.exit(2)
 orig = mt_config.load_loose_json(src)
 data = json.load(open("mt_work/masked.json", encoding="utf-8"))
 tokens = json.load(open("mt_work/tokens.json", encoding="utf-8"))
@@ -83,8 +88,8 @@ for k, v in data.items():
     ok += 1
 
 dst = os.path.splitext(src)[0] + "_translated.json"
-json.dump(out, open(dst, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-json.dump(data, open("mt_work/masked.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)  # 回写：清掉坏值供重翻
+mt_config.dump_json_atomic(dst, out, indent=2)
+mt_config.dump_json_atomic("mt_work/masked.json", data)  # 回写：清掉坏值供重翻
 print(f"回填成功: {ok}；记号丢失留空: {drop_tok}；换行异常留空: {drop_nl}；未翻: {empty}")
 print(f"输出: {dst}")
 if drop_tok:

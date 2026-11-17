@@ -15,7 +15,7 @@ OmniTrans 第二步：提交翻译（谷歌免费端点）
     python mt_translate.py           # 批量模式（默认，快）
     python mt_translate.py --seg     # 分段模式（慢但记号绝不丢，用于扫尾）
 """
-import json, re, sys, io, time, random, urllib.request, urllib.parse
+import json, re, sys, io, os, time, random, urllib.request, urllib.parse
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import mt_config
@@ -152,6 +152,9 @@ def ctx_for(keys_pos, keys, k):
 
 
 def main():
+    if not os.path.exists(IN):
+        print(f"[错误] 找不到 {IN} —— 先完成清洗步骤（GUI 拖入 json，或 mt_clean.py）")
+        sys.exit(2)
     data = json.load(open(IN, encoding="utf-8"))
     keys = [k for k, v in data.items() if not (isinstance(v, str) and v.strip())]
     total = len(keys)
@@ -171,7 +174,7 @@ def main():
             data[k] = "".join(out)
             done += 1
             if n % 50 == 0:
-                json.dump(data, open(IN, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+                mt_config.dump_json_atomic(IN, data)
                 rate = done / (time.time() - t0)
                 print(f"{done}/{total} ({rate:.1f}/s eta {(total-done)/rate/60:.0f}分)", flush=True)
     elif API_TYPE == "openai":
@@ -187,7 +190,7 @@ def main():
                 data[k] = v
             done += len(group)
             gi += len(group)
-            json.dump(data, open(IN, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+            mt_config.dump_json_atomic(IN, data)
             rate = done / max(time.time() - t0, 0.001)
             eta = (total - done) / rate / 60
             print(f"{done}/{total} ({rate:.1f}/s eta {eta:.0f}分)", flush=True)
@@ -206,12 +209,12 @@ def main():
                 data[k] = v
             done += len(group)
             if (gi // B) % 10 == 0:
-                json.dump(data, open(IN, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+                mt_config.dump_json_atomic(IN, data)
                 rate = done / (time.time() - t0)
                 eta = (total - done) / rate / 60 if rate > 0 else -1
                 print(f"{done}/{total} ({rate:.1f}/s eta {eta:.0f}分)", flush=True)
             time.sleep(0.45 + random.random() * 0.5)
-    json.dump(data, open(IN, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    mt_config.dump_json_atomic(IN, data)
     print(f"完成 {done}/{total}，用时 {(time.time()-t0)/60:.1f} 分钟")
     print("下一步: python mt_apply.py")
 

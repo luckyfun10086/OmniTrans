@@ -74,9 +74,12 @@ def translate_once(text, sl, tl, endpoint=None, api_key=None, api_header=None,
                 raise ApiError("fatal", "AI 翻译需要填写完整接口地址，"
                                "例如 https://api.deepseek.com/chat/completions / URL is empty")
             sys_prompt = ("You are a professional game translator. Translate the user's text "
-                          f"from {sl} to {tl}. Output ONLY the translation, nothing else. "
-                          "Keep placeholder tokens like 〔T1a2b3c4〕 EXACTLY unchanged and in "
-                          "the corresponding places. Preserve line breaks where they appear as tokens.")
+                          f"from {sl} to {tl}. It is in-game dialogue/UI text: write natural, "
+                          f"conversational {tl} that matches the speaker's tone. "
+                          "Output ONLY the translation, nothing else — no notes, no quotes "
+                          "around it. Keep placeholder tokens like 〔T1a2b3c4〕 EXACTLY "
+                          "unchanged and in the corresponding places. Preserve line breaks "
+                          "where they appear as tokens.")
             body = json.dumps({
                 "model": model or "gpt-4o-mini",
                 "messages": [{"role": "system", "content": sys_prompt},
@@ -150,6 +153,17 @@ def load_loose_json(path):
     return json.loads(_strip_json_comments(txt), strict=False)   # strict=False: 允许字符串内的原始控制字符
 
 
+def dump_json_atomic(path, obj, indent=1):
+    """原子落盘：先写同目录 .tmp 再 os.replace——写一半崩溃/断电不会留下半截 json。
+    masked.json 每个批次都会重写一次，非原子写入一旦写坏，断点续翻的数据就全废了。"""
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=indent)
+    os.replace(tmp, path)      # 同目录替换：Windows 上也是原子操作
+
+
 # ---------- AI 批量翻译（OpenAI 兼容；N 条打包 + 等长校验） ----------
 AI_BATCH_SYS = (
     "You are a professional game localizer. Translate each item's \"text\" from "
@@ -159,6 +173,8 @@ AI_BATCH_SYS = (
     "- Every input id must appear exactly once. Never add, drop, merge or reorder items.\n"
     "- Keep placeholder tokens like 〔T1a2b3c4〕 EXACTLY unchanged and in their positions.\n"
     "- Preserve line breaks and trailing quotation marks such as 」』\".\n"
+    "- Write natural, conversational game dialogue in {tl} that matches the speaker's\n"
+    "  tone; never add explanations, translator notes or extra quotes.\n"
     "- If an item has a \"ctx\" field, it is surrounding dialogue provided as context "
     "ONLY — never translate it and never include it in your output."
 )
@@ -196,7 +212,19 @@ def _extract_json_items(content, n):
         if isinstance(it, dict):
             idx = it.get("id")
             txt = it.get("zh", it.get("translation", it.get("text", it.get("译文"))))
-            if isinstance(idx, int) and isinstance(txt, str):
+            # id 容错：模型偶尔输出 "3"（字符串）或 3.0（浮点）——数值等价即接受，
+            # 避免整组作废降级逐条（多花一倍请求还丢上下文）
+            if isinstance(idx, bool):
+                idx = None
+            elif isinstance(idx, int):
+                pass
+            elif isinstance(idx, float) and idx.is_integer():
+                idx = int(idx)
+            elif isinstance(idx, str) and idx.strip().isdigit():
+                idx = int(idx.strip())
+            else:
+                idx = None
+            if idx is not None and isinstance(txt, str):
                 out[idx] = txt
         elif isinstance(it, str) and len(items) == n:
             out[len(out) + 1] = it

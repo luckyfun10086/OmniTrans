@@ -131,6 +131,13 @@ S = {
                        "MTool 用法：文件已在游戏目录且名为 ManualTransFile.json，\n"
                        "用「与工具一同启动.bat」启动游戏即可加载。"),
         "g_mtool_nogame": "未识别游戏目录——将导出到译文同目录",
+        # ---- 程序性防护 / 点击体验补充 ----
+        "busy": "正在处理中，请等当前任务结束",
+        "msg_nofile": "请先拖入或选择要翻译的文件\n（JSON / 游戏目录 / 字幕 / 音视频 / 漫画）",
+        "lib_del_t": "删除记录",
+        "lib_del_b": "确定删除「{}」的翻译记录？\n（不会删除游戏目录和译文文件）",
+        "drop_multi": "本次拖入 {} 项，仅处理第一项：{}",
+        "path_miss": "路径不存在 / path not found:\n{}",
     },
     "en": {
         "title": "OmniTrans — One-click Game Translator",
@@ -229,6 +236,13 @@ S = {
                        "For MTool: keep the file in the game folder as ManualTransFile.json\n"
                        "and launch via the MTool launcher bat."),
         "g_mtool_nogame": "No game folder detected — exporting next to the json",
+        # ---- safeguards / click-experience additions ----
+        "busy": "Busy — wait for the current task to finish",
+        "msg_nofile": "Drop or pick something to translate first\n(JSON / game folder / subtitles / video / comics)",
+        "lib_del_t": "Delete entry",
+        "lib_del_b": "Delete the record \"{}\"?\n(The game folder and translated files are kept)",
+        "drop_multi": "{} items dropped — only the first was used: {}",
+        "path_miss": "Path not found / 路径不存在:\n{}",
     },
 }
 
@@ -421,10 +435,9 @@ class Pipe:
             old = json.load(open(tp, encoding="utf-8"))
             old.update(tokens)
             tokens = old
-        json.dump(masked, open(mp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        json.dump(tokens, open(tp, "w", encoding="utf-8"), ensure_ascii=False, indent=0)
-        json.dump(name_zh, open(os.path.join(self.work, "names_map.json"), "w", encoding="utf-8"),
-                  ensure_ascii=False, indent=0)
+        mt_config.dump_json_atomic(mp, masked)
+        mt_config.dump_json_atomic(tp, tokens, indent=0)
+        mt_config.dump_json_atomic(os.path.join(self.work, "names_map.json"), name_zh, indent=0)
         self.log(self.L["log_clean"].format(len(masked), len(names)))
         return masked, tokens
 
@@ -645,8 +658,7 @@ class Pipe:
             self.log(f"[ai-batch] {self.ai_degraded} 条降级为逐条翻译（模型结构输出不符）")
 
     def _save(self, masked):
-        json.dump(masked, open(os.path.join(self.work, "masked.json"), "w", encoding="utf-8"),
-                  ensure_ascii=False, indent=1)
+        mt_config.dump_json_atomic(os.path.join(self.work, "masked.json"), masked)
 
     def _eta(self, t0, done, total):
         r = done / (time.time() - t0)
@@ -703,16 +715,18 @@ class Pipe:
         for k, zh in result.items():
             out[key_of(k)] = zh
         dst = os.path.splitext(self.src)[0] + "_translated.json"
-        json.dump(out, open(dst, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        mt_config.dump_json_atomic(dst, out, indent=2)
         self._save(masked)
         return dst, ok, drop_tok + drop_nl
 
     def run(self):
         masked, tokens = self.clean()
         if not masked:
-            orig = json.load(open(self.src, encoding="utf-8"))
+            # 全部条目已有译文：原样输出（loose 解析与 repair 同主管线，含注释/污染值也能走通）
+            orig = mt_config.load_loose_json(self.src)
+            out = {k: mt_config.repair_value(v) for k, v in orig.items()}
             dst = os.path.splitext(self.src)[0] + "_translated.json"
-            json.dump(orig, open(dst, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+            mt_config.dump_json_atomic(dst, out, indent=2)
             self.log(self.L["no_trans"])
             return dst, 0, 0
         masked = self.translate(masked)
@@ -1048,8 +1062,7 @@ class App:
 
     def _library_save(self):
         try:
-            json.dump(self.library, open(self._library_path(), "w", encoding="utf-8"),
-                      ensure_ascii=False, indent=1)
+            mt_config.dump_json_atomic(self._library_path(), self.library)
         except Exception as e:
             self.log(f"[library] 保存失败: {e}")
 
@@ -1137,9 +1150,14 @@ class App:
         g = self._lib_selected()
         if not g:
             return
+        # 防误点：删除只是移除记录，但仍需二次确认（一键误删历史记录找不回来）
+        if not messagebox.askyesno(self.T("lib_del_t"),
+                                   self.T("lib_del_b").format(g.get("name", "?"))):
+            return
         self.library["games"] = [x for x in self.library["games"] if x is not g]
         self._library_save()
         self._library_refresh()
+        self.log(f"[library] 已删除记录「{g.get('name', '?')}」")
 
     # ---------------- 译文微调 ----------------
     def rv_load(self, path=None):
@@ -1223,6 +1241,9 @@ class App:
                    style="Accent.TButton").pack(side="left")
         ttk.Button(btns, text=self.T("rv_cancel"), command=win.destroy).pack(
             side="left", padx=8)
+        # 键盘：Ctrl+Enter 保存（Enter 保留换行输入），Esc 取消
+        tz.bind("<Control-Return>", lambda e: (save(), "break")[1])
+        win.bind("<Escape>", lambda e: win.destroy())
         tz.focus_set()
 
     def rv_save(self):
@@ -1230,8 +1251,7 @@ class App:
             return
         out = {k: v for k, v in self.review_data}
         try:
-            json.dump(out, open(self.review_path, "w", encoding="utf-8"),
-                      ensure_ascii=False, indent=2)
+            mt_config.dump_json_atomic(self.review_path, out, indent=2)
         except Exception as e:
             messagebox.showerror(self.T("error"), str(e))
             return
@@ -1309,7 +1329,9 @@ class App:
         self.lbl_stage = ttk.Label(prog, textvariable=self.stage_var,
                                    font=("Microsoft YaHei UI", 10, "bold"))
         self.lbl_stage.pack(anchor="w")
-        self.bar = ttk.Progressbar(prog, maximum=100, style="TProgressbar")
+        self.barvar = tk.DoubleVar(value=0)
+        self.bar = ttk.Progressbar(prog, maximum=100, style="TProgressbar",
+                                    variable=self.barvar)
         self.bar.pack(fill="x", pady=5)
         self.detail_var = tk.StringVar(value="")
         ttk.Label(prog, textvariable=self.detail_var, style="Hint.TLabel").pack(anchor="w")
@@ -1331,6 +1353,12 @@ class App:
                                    fg=self.pal["log_fg"], relief="flat",
                                    highlightthickness=1, highlightbackground=self.pal["drop_border"])
         self.logbox.pack(fill="both", expand=True, pady=(6, 2))
+        # 日志右键菜单：复制/全选/清空（日志区只读，此前想复制一段报错只能手动拖选）
+        self._log_menu = tk.Menu(self.root, tearoff=0)
+        self._log_menu.add_command(label="复制 Copy", command=self._log_copy)
+        self._log_menu.add_command(label="全选 Select all", command=self._log_select_all)
+        self._log_menu.add_command(label="清空 Clear", command=self._log_clear)
+        self.logbox.bind("<Button-3>", self._log_menu_popup)
 
         # ===== Tab2 游戏汉化 =====
         t2 = ttk.Frame(self.nb, padding=10)
@@ -1367,6 +1395,14 @@ class App:
         self.mtool_btn = ttk.Button(gbtns, text=self.T("g_mtool"),
                                     command=self.export_mtool)
         self.mtool_btn.pack(side="left", padx=8)
+        # 进度镜像：翻译/回写从本页发起时，阶段与进度条只在「快速翻译」页可见，
+        # 留在本页会像“假死”——同一变量绑两份控件即可见
+        self.lbl_g_stage = ttk.Label(t2, textvariable=self.stage_var,
+                                     font=("Microsoft YaHei UI", 10, "bold"))
+        self.lbl_g_stage.pack(anchor="w", pady=(6, 0))
+        self.gbar = ttk.Progressbar(t2, maximum=100, style="TProgressbar",
+                                    variable=self.barvar)
+        self.gbar.pack(fill="x", pady=(4, 2))
         self.g_note_lbl = ttk.Label(t2, text=self.T("g_backup_note"), style="Hint.TLabel",
                                     wraplength=760, justify="left")
         self.g_note_lbl.pack(anchor="w", pady=(2, 6))
@@ -1531,10 +1567,26 @@ class App:
         if HAS_DND:
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind("<<Drop>>", self._on_dnd_drop)
+        # ---- 全局快捷键：Enter 直接开始翻译（焦点在输入框/按钮上时不拦截） ----
+        self.root.bind("<Return>", self._on_return)
+
+    def _on_return(self, e):
+        w = self.root.focus_get()
+        if w is not None and w.winfo_class() in ("TEntry", "TCombobox", "Text",
+                                                 "TSpinbox", "TButton", "TNotebook"):
+            return
+        if (str(self.start_btn["state"]) == "normal" and self.src_file
+                and not (self.worker and self.worker.is_alive())):
+            self.start()
 
     def _on_dnd_drop(self, event):
         """tkdnd <<Drop>> 回调（测试注入点：FakeEvent(data=…) 直调即全链路）"""
-        self.on_drop(self._dnd_clean(event.data))
+        # 多文件同时拖入时 tkdnd 用 "{p1} {p2}" 分隔——静默丢掉其余项会让人困惑
+        n = event.data.count("} {") + 1
+        first = self._dnd_clean(event.data)
+        if n > 1:
+            self.log(self.T("drop_multi").format(n, os.path.basename(first)))
+        self.on_drop(first)
 
     # ---- 语言切换 ----
     def toggle_lang(self):
@@ -1625,8 +1677,37 @@ class App:
     def log(self, msg):
         self.q.put(("log", msg))
 
+    # ---- 日志区右键：复制 / 全选 / 清空 ----
+    def _log_menu_popup(self, e):
+        try:
+            self._log_menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            self._log_menu.grab_release()
+
+    def _log_copy(self):
+        try:
+            s = self.logbox.get("sel.first", "sel.last")
+        except tk.TclError:
+            s = self.logbox.get("1.0", "end-1c")
+        if s:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(s)
+
+    def _log_select_all(self):
+        self.logbox.focus_set()
+        self.logbox.tag_add("sel", "1.0", "end-1c")
+
+    def _log_clear(self):
+        self.logbox.config(state="normal")
+        self.logbox.delete("1.0", "end")
+        self.logbox.config(state="disabled")
+
     def on_drop(self, path):
         path = path.strip().strip('"')
+        if not os.path.exists(path):
+            # 拖拽/剪贴板可能给出失效路径——早退并明说，而不是报“无法识别内容”误导
+            messagebox.showwarning("Info", self.T("path_miss").format(path))
+            return
         if not path.lower().endswith(".json"):
             # 不是 json → 尝试引擎识别（目录 / exe / 字幕 / 音视频 / 漫画档）
             eng, name, ok, reason = mt_config.detect_engine(path)
@@ -1688,7 +1769,7 @@ class App:
             messagebox.showwarning("Info", self.T("g_drop"))
             return
         if self.worker and self.worker.is_alive():
-            messagebox.showwarning("Info", "busy / 正忙")
+            messagebox.showwarning("Info", self.T("busy"))
             return
         self.g_extract_btn.config(state="disabled")
         self.stage_var.set(self.T("g_extracting"))
@@ -1711,7 +1792,7 @@ class App:
             return False
         self.log("[unity] 正在安装 UnityPy…（可能需要 1-3 分钟）")
         self.stage_var.set("Installing UnityPy…")
-        self.bar["value"] = 10
+        self.barvar.set(10)
         self.root.update()
         ok, msg = mt_config.install_unitypy()
         if ok:
@@ -1742,7 +1823,7 @@ class App:
             return False
         self.log("[media] 正在安装 faster-whisper…（可能需要几分钟）")
         self.stage_var.set("Installing faster-whisper…")
-        self.bar["value"] = 10
+        self.barvar.set(10)
         self.root.update()
         ok, msg = mt_config.install_fasterwhisper()
         if ok:
@@ -1778,7 +1859,7 @@ class App:
         for name, installer in missing:
             self.log(f"[comic] 正在安装 {name}…")
             self.stage_var.set(f"Installing {name}…")
-            self.bar["value"] = 10
+            self.barvar.set(10)
             self.root.update()
             ok, msg = installer()
             if not ok:
@@ -1831,7 +1912,7 @@ class App:
             return
         self.log(f"[extract] 运行 {script} {game_path}")
         self.stage_var.set("提取中… / Extracting…")
-        self.bar["value"] = 0
+        self.barvar.set(0)
         def worker():
             import importlib.util
             cap = _StreamCap(self.q)    # stdout 代理：整行实时进日志区（听译长任务可见进度）
@@ -1904,7 +1985,12 @@ class App:
         self.log(f"[file] {p}")
 
     def start(self):
-        if not self.src_file or (self.worker and self.worker.is_alive()):
+        if self.worker and self.worker.is_alive():
+            return
+        if not self.src_file:
+            # 以前静默 return——点了没反应，像按钮坏了
+            messagebox.showinfo("Info", self.T("msg_nofile"))
+            self.nb.select(0)
             return
         sl = dict(LANGS)[self.sl_var.get()]
         tl = dict(LANGS)[self.tl_var.get()]
@@ -1951,36 +2037,70 @@ class App:
         self.log(self.T("log_cancel"))
 
     def export_mtool(self):
-        """把最新译文导出为游戏目录下的 ManualTransFile.json（MTool 挂载用）"""
-        import glob as g, subprocess as sp
+        """把最新译文导出为游戏目录下的 ManualTransFile.json（MTool 挂载用）。
+        与提取/回写一致在线程内 import 运行：打包 exe 里 sys.executable 是 GUI 自身，
+        旧版 `subprocess [sys.executable, script]` 会把自己再启动一遍而不是跑导出。"""
+        if self.worker and self.worker.is_alive():
+            messagebox.showwarning("Info", self.T("busy"))
+            return
+        import glob as g
         base = mt_config.base_dir()
         cands = sorted(g.glob(os.path.join(base, "*_translated.json")),
                        key=os.path.getmtime, reverse=True)
         if not cands:
             messagebox.showinfo("Info", self.T("g_mtool_no"))
             return
+        script_path = self._resolve_script("engines/mtool_export.py")
+        if not script_path:
+            messagebox.showerror("Error", "engines/mtool_export.py 缺失 / missing — "
+                                 "请使用完整发行包 / use the full release package")
+            return
         trfile = cands[0]
-        args = [sys.executable, self._resolve_script("engines/mtool_export.py"), trfile]
+        args = [trfile]
         if self.game_path and os.path.isdir(self.game_path):
             args += ["--dir", self.game_path]
         else:
             self.log("[mtool] " + self.T("g_mtool_nogame"))
-        r = sp.run(args, capture_output=True, text=True, encoding="utf-8",
-                   errors="replace", cwd=base)
-        self.log((r.stdout or "").strip())
-        if r.returncode != 0:
-            messagebox.showerror(self.T("error"), (r.stderr or "")[-400:])
-            return
-        import re as _re
-        m = _re.search(r"导出 (\d+) 键.*?→ (.+)", r.stdout or "")
-        if m:
-            messagebox.showinfo(self.T("g_mtool"),
-                                self.T("g_mtool_ok").format(m.group(1), m.group(2)))
+        self.log(f"[mtool] 运行 mtool_export.py {os.path.basename(trfile)}")
+        def worker():
+            import importlib.util
+            cap = _StreamCap(self.q)
+            old_argv, old_stdout = sys.argv, sys.stdout
+            try:
+                spec = importlib.util.spec_from_file_location("mtool_export", script_path)
+                mod = importlib.util.module_from_spec(spec)
+                sys.argv = ["mtool_export.py"] + args
+                sys.stdout = cap
+                spec.loader.exec_module(mod)
+                mod.main()
+                sys.stdout = old_stdout
+                sys.argv = old_argv
+                import re as _re
+                m = _re.search(r"导出 (\d+) 键.*?→ (.+)", "\n".join(cap.tail(20)))
+                self.q.put(("mtool_done", (m.group(1), m.group(2).strip()) if m else None))
+            except SystemExit:
+                sys.stdout = old_stdout
+                sys.argv = old_argv
+                self.q.put(("error", "\n".join(cap.tail(5)) or "mtool_export 退出"))
+            except Exception:
+                sys.stdout = old_stdout
+                sys.argv = old_argv
+                self.q.put(("error", traceback.format_exc()[-800:]))
+            finally:
+                try:
+                    cap.flush()
+                except Exception:
+                    pass
+        threading.Thread(target=worker, daemon=True).start()
 
     def apply_to_game(self):
         """点击「导入游戏」按钮：找译文 json + 游戏路径，运行对应 apply 脚本"""
         if not self.game_path or not self.apply_script:
             messagebox.showwarning("Info", "请先拖入游戏目录进行引擎识别 / Drag a game folder first")
+            return
+        if self.worker and self.worker.is_alive():
+            # 回写会动游戏文件，与翻译线程并发跑同一批文件有竞态——必须排队
+            messagebox.showwarning("Info", self.T("busy"))
             return
         # 找最新译文 json
         import glob as g
@@ -2017,7 +2137,7 @@ class App:
         self.log(f"[apply] 运行 {script} {game_path} {trfile}")
         self.stage_var.set("回写中… / Applying…")
         self.lbl_stage.config(foreground=self.pal["accent"])
-        self.bar["value"] = 50
+        self.barvar.set(50)
         for b in (self.apply_btn, self.mtool_btn, self.g_extract_btn):
             b.config(state="disabled")
         def worker():
@@ -2040,7 +2160,7 @@ class App:
                 sys.argv = old_argv
                 for line in cap.buf_tail():   # 旧引擎替换 stdout 的输出补末尾；新引擎为空
                     self.log(f"  | {line}")
-                self.bar["value"] = 100
+                self.barvar.set(100)
                 self.stage_var.set("✅ 已导入游戏 / Applied to Game")
                 self.q.put(("applied", game_path))
             except SystemExit:
@@ -2094,7 +2214,7 @@ class App:
                             "apply": self.T("stage_apply")}[stage]
                     pct = done * 100 // max(total, 1)
                     self.stage_var.set(f"{name}  {done}/{total}  （{pct}%）")
-                    self.bar["value"] = pct
+                    self.barvar.set(pct)
                     self.detail_var.set(f"{note}    {pct}%")
                 elif kind == "done":
                     dst, ok, drop = payload
@@ -2102,7 +2222,7 @@ class App:
                     self.library_add(dst, ok, drop)
                     self.log("[hint] 可先在「✏️ 译文微调」页检查修改，再导入游戏 / "
                              "Review & fix translations before applying")
-                    self.bar["value"] = 100
+                    self.barvar.set(100)
                     self.stage_var.set(self.T("done_stage"))
                     self.detail_var.set(f"ok={ok}, skipped={drop}")
                     self.log(f"[output] {dst}")
@@ -2143,6 +2263,10 @@ class App:
                         f"游戏: {payload}\n"
                         f"（Kirikiri/Ren'Py 为非破坏补丁，删除补丁文件即还原；"
                         f"其余引擎原文件已备份 .automt.bak）")
+                elif kind == "mtool_done":
+                    if payload:
+                        messagebox.showinfo(self.T("g_mtool"),
+                                            self.T("g_mtool_ok").format(*payload))
                 elif kind == "cancelled":
                     self.stage_var.set(self.T("cancelled"))
                     self.lbl_stage.config(foreground=self.pal["hint"])
